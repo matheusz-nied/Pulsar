@@ -278,7 +278,7 @@ Mock da API do Claude usando unittest.mock para não gastar tokens nos testes.
 
 ---
 
-## TAREFA 2.1 — STT com faster-whisper
+## Feita - TAREFA 2.1 — STT com faster-whisper
 
 **Prompt para o agente:**
 ```
@@ -302,7 +302,7 @@ Crie o arquivo backend/audio/stt.py com as seguintes especificações:
 
 ---
 
-## TAREFA 2.2 — TTS com edge-tts
+## Feita - TAREFA 2.2 — TTS com edge-tts
 
 **Prompt para o agente:**
 ```
