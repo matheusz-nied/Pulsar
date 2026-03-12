@@ -48,7 +48,15 @@ def register_tool(name: str, description: str) -> Callable:
 def _register_builtin_tools() -> None:
     """Registra as tools internas do agente."""
     from backend.tools.news import buscar_noticias
-    from backend.tools.system import abrir_app, ajustar_volume, confirmar_fechar, fechar_app
+    from backend.tools.system import (
+        abrir_app,
+        ajustar_volume,
+        cancelar_alarme,
+        confirmar_fechar,
+        definir_alarme,
+        fechar_app,
+        listar_alarmes,
+    )
     from backend.tools.web import buscar_web, resumir_pagina
 
     register_tool(
@@ -97,6 +105,25 @@ def _register_builtin_tools() -> None:
         name="ajustar_volume",
         description="Ajusta o volume do sistema (0-100). Funciona em Linux, Windows e macOS.",
     )(ajustar_volume)
+
+    register_tool(
+        name="definir_alarme",
+        description=(
+            "Define um alarme para um horário específico. "
+            "Formatos: 'HH:MM' (hoje/amanhã) ou 'HH:MM DD/MM/YYYY'. "
+            "Reproduz áudio TTS e envia notificação via Telegram se configurado."
+        ),
+    )(definir_alarme)
+
+    register_tool(
+        name="listar_alarmes",
+        description="Lista todos os alarmes agendados ativos com ID, horário e mensagem.",
+    )(listar_alarmes)
+
+    register_tool(
+        name="cancelar_alarme",
+        description="Cancela um alarme pelo seu ID.",
+    )(cancelar_alarme)
 
 
 _register_builtin_tools()

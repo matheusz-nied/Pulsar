@@ -11,6 +11,7 @@ Responsável por:
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
 from typing import Any
@@ -307,3 +308,240 @@ async def ajustar_volume(nivel: int) -> str:
     except Exception as e:
         logger.error(f"Erro ao ajustar volume: {e}")
         return f"Erro ao ajustar volume: {str(e)}"
+
+
+# ============================================================================
+# AGENDAMENTO DE ALARMES
+# ============================================================================
+
+from datetime import datetime
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# Scheduler global (será iniciado no lifespan do FastAPI)
+scheduler: AsyncIOScheduler | None = None
+
+
+def iniciar_scheduler() -> None:
+    """
+    Inicializa o scheduler do APScheduler.
+    Deve ser chamado no startup do FastAPI.
+    """
+    global scheduler
+    if scheduler is None:
+        scheduler = AsyncIOScheduler()
+        scheduler.start()
+        logger.info("APScheduler iniciado com sucesso")
+    else:
+        logger.warning("APScheduler já está iniciado")
+
+
+def parar_scheduler() -> None:
+    """
+    Para o scheduler graciosamente.
+    Deve ser chamado no shutdown do FastAPI.
+    """
+    global scheduler
+    if scheduler is not None:
+        scheduler.shutdown(wait=True)
+        logger.info("APScheduler encerrado")
+        scheduler = None
+
+
+async def _executar_alarme(mensagem: str, job_id: str) -> None:
+    """
+    Callback executado quando um alarme dispara.
+
+    Args:
+        mensagem: Mensagem do alarme.
+        job_id: ID do job agendado.
+    """
+    try:
+        logger.info(f"🔔 ALARME DISPARADO (ID={job_id}): {mensagem}")
+
+        # TTS: sintetizar e tocar o áudio
+        try:
+            from backend.audio.tts import get_tts
+
+            tts = get_tts()
+            audio_path = await tts.sintetizar(mensagem)
+            logger.info(f"Áudio do alarme gerado: {audio_path}")
+        except Exception as e:
+            logger.warning(f"Erro ao sintetizar áudio do alarme: {e}")
+
+        # Telegram: enviar notificação se configurado
+        try:
+            telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+            if telegram_token and telegram_chat_id:
+                import httpx
+
+                url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+                payload = {
+                    "chat_id": telegram_chat_id,
+                    "text": f"🔔 Alarme:\n{mensagem}",
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(url, json=payload)
+                logger.info("Notificação do alarme enviada via Telegram")
+        except Exception as e:
+            logger.warning(f"Erro ao enviar notificação do alarme via Telegram: {e}")
+
+    except Exception as e:
+        logger.error(f"Erro ao executar alarme {job_id}: {e}")
+
+
+async def definir_alarme(horario: str, mensagem: str) -> str:
+    """
+    Define um alarme para um horário específico.
+
+    Args:
+        horario: Horário no formato "HH:MM" ou "HH:MM DD/MM/YYYY".
+        mensagem: Mensagem a ser exibida/tocada quando o alarme disparar.
+
+    Returns:
+        Mensagem de confirmação com o horário e ID do job.
+    """
+    global scheduler
+
+    if scheduler is None:
+        return "Erro: Scheduler não está inicializado. Reinicie o servidor."
+
+    try:
+        # Parsear horário
+        horario_limpo = horario.strip()
+
+        # Tentar formato "HH:MM DD/MM/YYYY"
+        try:
+            data_hora = datetime.strptime(horario_limpo, "%H:%M %d/%m/%Y")
+        except ValueError:
+            # Tentar formato "HH:MM" (hoje)
+            try:
+                hora_minuto = datetime.strptime(horario_limpo, "%H:%M")
+                agora = datetime.now()
+                data_hora = agora.replace(
+                    hour=hora_minuto.hour,
+                    minute=hora_minuto.minute,
+                    second=0,
+                    microsecond=0,
+                )
+
+                # Se o horário já passou hoje, agendar para amanhã
+                if data_hora <= agora:
+                    from datetime import timedelta
+                    data_hora += timedelta(days=1)
+
+            except ValueError:
+                return (
+                    f"Erro: Formato de horário inválido '{horario}'. "
+                    f"Use 'HH:MM' ou 'HH:MM DD/MM/YYYY'."
+                )
+
+        # Verificar se o horário está no futuro
+        if data_hora <= datetime.now():
+            return "Erro: O horário do alarme deve estar no futuro."
+
+        # Criar job único
+        job = scheduler.add_job(
+            _executar_alarme,
+            trigger="date",
+            run_date=data_hora,
+            args=[mensagem, ""],  # job_id será preenchido depois
+            id=None,  # Gerar ID automático
+        )
+
+        # Atualizar args com o job_id real
+        scheduler.modify_job(job.id, args=[mensagem, job.id])
+
+        data_hora_formatada = data_hora.strftime("%d/%m/%Y às %H:%M")
+        logger.info(f"Alarme agendado: {mensagem} para {data_hora_formatada} (ID={job.id})")
+
+        return (
+            f"✅ Alarme agendado para {data_hora_formatada}\n"
+            f"Mensagem: {mensagem}\n"
+            f"ID: {job.id}"
+        )
+
+    except Exception as e:
+        logger.error(f"Erro ao definir alarme: {e}")
+        return f"Erro ao definir alarme: {str(e)}"
+
+
+async def listar_alarmes() -> str:
+    """
+    Lista todos os alarmes agendados ativos.
+
+    Returns:
+        String formatada com a lista de alarmes ou mensagem indicando que não há alarmes.
+    """
+    global scheduler
+
+    if scheduler is None:
+        return "Erro: Scheduler não está inicializado."
+
+    try:
+        jobs = scheduler.get_jobs()
+
+        if not jobs:
+            return "Nenhum alarme agendado no momento."
+
+        linhas = ["📋 Alarmes agendados:\n"]
+        for job in jobs:
+            # Extrair informações do job
+            job_id = job.id
+            run_date = job.next_run_time
+
+            if run_date:
+                data_hora_formatada = run_date.strftime("%d/%m/%Y às %H:%M:%S")
+            else:
+                data_hora_formatada = "Data não disponível"
+
+            # Tentar extrair mensagem dos args
+            mensagem = "Sem mensagem"
+            if job.args and len(job.args) > 0:
+                mensagem = job.args[0]
+
+            linhas.append(
+                f"  • ID: {job_id}\n"
+                f"    Horário: {data_hora_formatada}\n"
+                f"    Mensagem: {mensagem}\n"
+            )
+
+        return "\n".join(linhas)
+
+    except Exception as e:
+        logger.error(f"Erro ao listar alarmes: {e}")
+        return f"Erro ao listar alarmes: {str(e)}"
+
+
+async def cancelar_alarme(job_id: str) -> str:
+    """
+    Cancela um alarme pelo seu ID.
+
+    Args:
+        job_id: ID do job a ser cancelado.
+
+    Returns:
+        Mensagem de confirmação ou erro se o alarme não for encontrado.
+    """
+    global scheduler
+
+    if scheduler is None:
+        return "Erro: Scheduler não está inicializado."
+
+    try:
+        # Tentar remover o job
+        job = scheduler.get_job(job_id)
+
+        if job is None:
+            return f"Erro: Alarme com ID '{job_id}' não encontrado."
+
+        scheduler.remove_job(job_id)
+        logger.info(f"Alarme {job_id} cancelado")
+
+        return f"✅ Alarme '{job_id}' cancelado com sucesso."
+
+    except Exception as e:
+        logger.error(f"Erro ao cancelar alarme {job_id}: {e}")
+        return f"Erro ao cancelar alarme: {str(e)}"

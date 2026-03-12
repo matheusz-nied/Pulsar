@@ -120,7 +120,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🚀 Assistente Virtual Local iniciando...")
     logger.info(f"Ambiente: {os.getenv('ENV', 'development')}")
     logger.info(f"Projeto raiz: {_PROJECT_ROOT}")
+    
+    # Inicializar APScheduler para alarmes
+    from backend.tools.system import iniciar_scheduler
+    iniciar_scheduler()
+    
     yield
+    
+    # Parar APScheduler graciosamente
+    from backend.tools.system import parar_scheduler
+    parar_scheduler()
+    
     logger.info("👋 Assistente Virtual Local encerrando...")
 
 

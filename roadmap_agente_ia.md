@@ -635,7 +635,7 @@ Adicionar ao requirements.txt: feedparser==6.0.11
 
 ---
 
-## TAREFA 2.7 — Tool: abrir_app()
+## Feita - TAREFA 2.7 — Tool: abrir_app()
 
 **Prompt para o agente:**
 ```
@@ -675,7 +675,7 @@ Adicionar ao requirements.txt: psutil
 
 ---
 
-## TAREFA 2.8 — Tool: definir_alarme()
+## Feito - TAREFA 2.8 — Tool: definir_alarme()
 
 **Prompt para o agente:**
 ```
@@ -777,7 +777,7 @@ Adicionar ao requirements.txt: pyaudio
 
 ---
 
-## TAREFA 3.1 — ChromaDB + embeddings
+## Muito difícil (Opus 4.6) TAREFA 3.1 — ChromaDB + embeddings
 
 **Prompt para o agente:**
 ```
@@ -863,7 +863,7 @@ Crie o arquivo backend/memory/database.py:
 
 ---
 
-## TAREFA 3.3 — Tool: Google Calendar
+## Difícil (Opus 4.6?) TAREFA 3.3 — Tool: Google Calendar
 
 **Prompt para o agente:**
 ```
@@ -900,7 +900,7 @@ Criar script separado: scripts/setup_google_auth.py que executa o fluxo OAuth2 u
 
 ---
 
-## TAREFA 3.4 — Tool: controle de música (YouTube Music)
+## Difícil (Opus 4.6?) TAREFA 3.4 — Tool: controle de música (YouTube Music)
 
 **Prompt para o agente:**
 ```
@@ -969,7 +969,7 @@ Crie o arquivo backend/tools/music.py:
 
 ---
 
-## TAREFA 3.5 — Sandboxing e confirmação verbal
+## Muito difícil (Opus 4.6) TAREFA 3.5 — Sandboxing e confirmação verbal
 
 **Prompt para o agente:**
 ```
