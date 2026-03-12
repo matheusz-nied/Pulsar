@@ -15,6 +15,7 @@ build/
 .venv/
 venv/
 env/
+.conda_env/
 
 # Cache de áudio gerado pelo TTS
 /backend/audio_cache/*.mp3
@@ -28,6 +29,7 @@ env/
 .idea/
 *.swp
 *.swo
+.windsurf/
 
 # OS
 .DS_Store
