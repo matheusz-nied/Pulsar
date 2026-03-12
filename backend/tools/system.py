@@ -262,8 +262,8 @@ async def ajustar_volume(nivel: int) -> str:
         elif sistema == "Windows":
             try:
                 from ctypes import POINTER, cast
-                from comtypes import CLSCTX_ALL
-                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+                from comtypes import CLSCTX_ALL  # type: ignore
+                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
 
                 devices = AudioUtilities.GetSpeakers()
                 interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
