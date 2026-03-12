@@ -37,7 +37,7 @@ load_dotenv(_PROJECT_ROOT / ".env")
 
 # Backend imports (precisam do .env carregado para inicializar o agente)
 from backend.agent.agent import agent  # noqa: E402
-from backend.agent.memory import persistent_memory, session_memory  # noqa: E402
+from backend.agent.memory import persistent_memory, session_memory, vector_memory  # noqa: E402
 from backend.audio.stt import get_stt  # noqa: E402
 from backend.audio.tts import get_tts  # noqa: E402
 from backend.memory.database import db  # noqa: E402
@@ -266,8 +266,8 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
         # a. Carregar histórico da sessão
         historico = session_memory.get_history(session_id)
 
-        # b. Chamar agente com mensagem e histórico
-        resposta = await agent.processar(request.mensagem, historico)  # type: ignore[arg-type]
+        # b. Chamar agente com mensagem e histórico (inclui busca/save na memória vetorial)
+        resposta = await agent.processar(request.mensagem, historico, session_id=session_id)  # type: ignore[arg-type]
 
         # c. Adicionar mensagem do usuário E resposta do agente ao histórico
         session_memory.add_message(session_id, "user", request.mensagem)
@@ -360,9 +360,9 @@ async def processar_voz(
 
         logger.info(f"Transcrição (sessão {session_id}): {transcricao}")
 
-        # 3. Processar com o agente
+        # 3. Processar com o agente (inclui busca/save na memória vetorial)
         historico = session_memory.get_history(session_id)
-        resposta = await agent.processar(transcricao, historico)  # type: ignore[arg-type]
+        resposta = await agent.processar(transcricao, historico, session_id=session_id)  # type: ignore[arg-type]
 
         # 4. Atualizar histórico da sessão
         session_memory.add_message(session_id, "user", transcricao)
@@ -549,11 +549,13 @@ async def websocket_audio(ws: WebSocket) -> None:
                     await ws.send_json({"type": "transcricao", "texto": transcricao})
                     logger.info(f"WS transcricao: {transcricao[:80]}...")
 
-                    # 3. Processar com agente (streaming)
+                    # 3. Processar com agente (streaming com contexto vetorial)
                     historico = session_memory.get_history(session_id)
                     resposta_completa = ""
 
-                    async for chunk in agent.processar_stream(transcricao, historico):
+                    async for chunk in agent.processar_stream(
+                        transcricao, historico, session_id=session_id
+                    ):
                         resposta_completa += chunk
                         await ws.send_json({"type": "resposta_chunk", "texto": chunk})
 
@@ -566,7 +568,13 @@ async def websocket_audio(ws: WebSocket) -> None:
                         session_id, session_memory.get_history(session_id)
                     )
 
-                    # 5. Sintetizar resposta (TTS)
+                    # 5a. Salvar na memória vetorial (streaming não salva dentro do agent)
+                    if vector_memory is not None:
+                        await vector_memory.salvar_conversa(
+                            session_id, transcricao, resposta_completa
+                        )
+
+                    # 6. Sintetizar resposta (TTS)
                     tts = get_tts()
                     audio_path = await tts.sintetizar(resposta_completa)
                     audio_filename = Path(audio_path).name

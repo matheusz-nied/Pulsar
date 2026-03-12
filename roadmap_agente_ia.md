@@ -863,7 +863,7 @@ Crie o arquivo backend/memory/database.py:
 
 ---
 
-## Difícil (Opus 4.6?) TAREFA 3.3 — Tool: Google Calendar
+## DEPOIS - Difícil (Opus 4.6?) TAREFA 3.3 — Tool: Google Calendar
 
 **Prompt para o agente:**
 ```

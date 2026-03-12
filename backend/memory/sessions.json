@@ -280,5 +280,65 @@
       "role": "assistant",
       "content": "Entendido. Teste concluído. Estou operacional. Pode prosseguir com o teste.\n"
     }
+  ],
+  "e2e-a-a6761195-5b06-4779-aa23-ac9054b7c1fe": [
+    {
+      "role": "user",
+      "content": "Guarde este fato: eu prefiro respostas bem curtas, em até 1 frase."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. Responderei em frases curtas.\n"
+    }
+  ],
+  "e2e-b-4790d8f6-4a28-4b27-9f8e-faa0079b07da": [
+    {
+      "role": "user",
+      "content": "Sem contexto desta sessão: como eu prefiro que as respostas sejam?"
+    },
+    {
+      "role": "assistant",
+      "content": "Prefira respostas diretas, claras e objetivas, sem rodeios. Se eu não souber algo, direi isso. Pronto.\n"
+    }
+  ],
+  "e2e2-a-246b0f39-df52-4b6d-9813-238cd2cd0fd5": [
+    {
+      "role": "user",
+      "content": "Guarde este fato sobre mim: eu prefiro respostas curtas, de no máximo 1 frase."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. Anotado: respostas concisas.\n"
+    }
+  ],
+  "e2e2-b-b51ecac9-3604-4fd9-8e91-13c94a08c5b8": [
+    {
+      "role": "user",
+      "content": "Em outra sessão agora: qual fato eu pedi para você guardar sobre meu estilo de resposta?"
+    },
+    {
+      "role": "assistant",
+      "content": "Eu não tenho registro de nenhum fato que você tenha me pedido para guardar sobre seu estilo de resposta. Por favor, tente me lembre o que você quis dizer."
+    }
+  ],
+  "e2e3-a-e2a9382a-2fd5-4813-b04e-d7644b46c54e": [
+    {
+      "role": "user",
+      "content": "Guarde este fato sobre mim: eu prefiro respostas curtas, de no máximo 1 frase."
+    },
+    {
+      "role": "assistant",
+      "content": "Anotado: respostas em até 1 frase."
+    }
+  ],
+  "e2e3-b-00e5f6e9-5cf7-4132-9ef1-e8d01da7c3b7": [
+    {
+      "role": "user",
+      "content": "Nova sessão: qual fato eu pedi para você guardar sobre meu estilo de resposta?"
+    },
+    {
+      "role": "assistant",
+      "content": "Você pediu para eu guardar que prefere respostas curtas, de no máximo 1 frase."
+    }
   ]
 }

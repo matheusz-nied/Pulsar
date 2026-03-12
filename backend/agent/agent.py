@@ -292,6 +292,7 @@ class ConversationAgent:
         self,
         mensagem: str,
         historico: list[dict[str, str]],
+        contexto_vetorial: str | None = None,
     ) -> list[SystemMessage | HumanMessage | AIMessage]:
         """
         Converte o histórico e mensagem para formato LangChain.
@@ -299,12 +300,17 @@ class ConversationAgent:
         Args:
             mensagem: Mensagem atual do usuário.
             historico: Lista de mensagens anteriores.
+            contexto_vetorial: Contexto extra da memória vetorial para injetar no system prompt.
 
         Returns:
             Lista de mensagens LangChain.
         """
+        system_content = self.system_prompt
+        if contexto_vetorial:
+            system_content += f"\n\n{contexto_vetorial}"
+
         messages: list[SystemMessage | HumanMessage | AIMessage] = [
-            SystemMessage(content=self.system_prompt),
+            SystemMessage(content=system_content),
         ]
 
         for msg in historico:
@@ -318,19 +324,56 @@ class ConversationAgent:
         messages.append(HumanMessage(content=mensagem))
         return messages
 
+    async def _buscar_contexto_vetorial(self, mensagem: str) -> str | None:
+        """
+        Busca contexto relevante na memória vetorial para enriquecer o prompt.
+
+        Args:
+            mensagem: Mensagem do usuário usada como query de busca.
+
+        Returns:
+            String formatada com o contexto encontrado, ou None se vazio.
+        """
+        from backend.agent.memory import vector_memory
+
+        if vector_memory is None:
+            return None
+
+        contexto_conversas = await vector_memory.buscar_contexto(mensagem)
+        contexto_fatos = await vector_memory.buscar_fatos(mensagem)
+
+        partes: list[str] = []
+        if contexto_conversas:
+            partes.append(
+                "Contexto de conversas anteriores:\n"
+                + "\n---\n".join(contexto_conversas)
+            )
+        if contexto_fatos:
+            partes.append(
+                "Fatos conhecidos sobre o usuário:\n"
+                + "\n".join(contexto_fatos)
+            )
+
+        return "\n\n".join(partes) if partes else None
+
     async def processar(
-        self, mensagem: str, historico: list[dict[str, str]]
+        self,
+        mensagem: str,
+        historico: list[dict[str, str]],
+        session_id: str = "default",
     ) -> str:
         """
         Processa uma mensagem do usuário pelo grafo LangGraph.
 
         O LLM decide se precisa chamar uma tool ou responder diretamente.
         Se chamar uma tool, o resultado é passado de volta ao LLM.
+        Busca contexto semântico antes de chamar o LLM e salva a conversa após.
 
         Args:
             mensagem: Mensagem atual do usuário.
             historico: Lista de mensagens anteriores no formato
                       [{"role": "user"/"assistant", "content": str}].
+            session_id: ID da sessão para persistência na memória vetorial.
 
         Returns:
             Resposta gerada pelo agente.
@@ -338,18 +381,31 @@ class ConversationAgent:
         Raises:
             RuntimeError: Se houver erro no processamento.
         """
+        from backend.agent.memory import vector_memory
+
         logger.info(f"Processando mensagem: {mensagem[:50]}...")
 
         try:
+            contexto_vetorial = await self._buscar_contexto_vetorial(mensagem)
+            mensagem_com_contexto = (
+                f"{contexto_vetorial}\n\nPergunta atual do usuário: {mensagem}"
+                if contexto_vetorial
+                else mensagem
+            )
+
             if not self._use_langgraph:
-                resposta = await self.provider.gerar_resposta(mensagem, historico)  # type: ignore[arg-type]
+                resposta = await self.provider.gerar_resposta(  # type: ignore[arg-type]
+                    mensagem_com_contexto,
+                    historico,
+                )
                 logger.debug(f"Resposta gerada (legacy): {resposta[:50]}...")
+                if vector_memory is not None:
+                    await vector_memory.salvar_conversa(session_id, mensagem, resposta)
                 return resposta
 
-            messages = self._converter_historico(mensagem, historico)
+            messages = self._converter_historico(mensagem, historico, contexto_vetorial)
             result = await self.graph.ainvoke({"messages": messages})
 
-            # Extrair a última mensagem do AI (sem tool_calls)
             for msg in reversed(result["messages"]):
                 if (
                     isinstance(msg, AIMessage)
@@ -362,6 +418,12 @@ class ConversationAgent:
                         else str(msg.content)
                     )
                     logger.debug(f"Resposta gerada: {resposta[:50]}...")
+
+                    if vector_memory is not None:
+                        await vector_memory.salvar_conversa(
+                            session_id, mensagem, resposta
+                        )
+
                     return resposta
 
             return "Não foi possível gerar uma resposta."
@@ -373,14 +435,22 @@ class ConversationAgent:
             ) from e
 
     async def processar_stream(
-        self, mensagem: str, historico: list[dict[str, str]]
+        self,
+        mensagem: str,
+        historico: list[dict[str, str]],
+        session_id: str = "default",
     ) -> AsyncIterator[str]:
         """
         Processa uma mensagem em modo streaming pelo grafo LangGraph.
 
+        Busca contexto semântico antes de iniciar o streaming.
+        O salvamento na memória vetorial deve ser feito pelo chamador
+        após coletar a resposta completa.
+
         Args:
             mensagem: Mensagem atual do usuário.
             historico: Lista de mensagens anteriores.
+            session_id: ID da sessão (usado para contexto vetorial).
 
         Yields:
             Chunks de texto da resposta conforme são gerados.
@@ -391,12 +461,22 @@ class ConversationAgent:
         logger.info(f"Processando mensagem (stream): {mensagem[:50]}...")
 
         try:
+            contexto_vetorial = await self._buscar_contexto_vetorial(mensagem)
+            mensagem_com_contexto = (
+                f"{contexto_vetorial}\n\nPergunta atual do usuário: {mensagem}"
+                if contexto_vetorial
+                else mensagem
+            )
+
             if not self._use_langgraph:
-                async for chunk in self.provider.gerar_resposta_stream(mensagem, historico):  # type: ignore[arg-type]
+                async for chunk in self.provider.gerar_resposta_stream(  # type: ignore[arg-type]
+                    mensagem_com_contexto,
+                    historico,
+                ):
                     yield chunk
                 return
 
-            messages = self._converter_historico(mensagem, historico)
+            messages = self._converter_historico(mensagem, historico, contexto_vetorial)
 
             async for event in self.graph.astream_events(
                 {"messages": messages}, version="v2"
