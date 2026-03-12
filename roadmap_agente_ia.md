@@ -29,11 +29,12 @@ Regras gerais:
 - Cada arquivo deve ter docstring explicando seu propósito
 - Erros devem ser tratados com try/except e logados via loguru
 - Nunca hardcodar chaves de API — sempre usar os.getenv()
+- Executavel em /home/kaizen/Documents/Dev/Projetos/Jarvis/assistente_local/.conda_env/bin/python 
 ```
 
 ---
 
-# FASE 1 — Esqueleto Funcional (MVP de Texto)
+# Feita - FASE 1 — Esqueleto Funcional (MVP de Texto)
 **Meta:** Loop texto → Claude → texto funcionando localmente.
 **Duração estimada:** 2 semanas
 
@@ -225,7 +226,7 @@ Crie o arquivo backend/agent/memory.py com as seguintes especificações:
 
 ---
 
-## TAREFA 1.6 — Conectar tudo na rota /conversar
+## Feita - TAREFA 1.6 — Conectar tudo na rota /conversar
 
 **Prompt para o agente:**
 ```
@@ -249,7 +250,7 @@ Mantenha o resto do arquivo intacto.
 
 ---
 
-## TAREFA 1.7 — Testes da Fase 1
+## Feita - TAREFA 1.7 — Testes da Fase 1
 
 **Prompt para o agente:**
 ```
