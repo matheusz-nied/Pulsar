@@ -353,7 +353,7 @@ Toda a rota deve ser async.
 
 ---
 
-## TAREFA 2.4 — WebSocket /ws/audio (streaming)
+## Muito difícil (Opus 4.6) TAREFA 2.4 — WebSocket /ws/audio (streaming)
 
 **Prompt para o agente:**
 ```
@@ -473,7 +473,7 @@ Adicionar ao requirements.txt: beautifulsoup4 (httpx já presente)
 
 ---
 
-## TAREFA 2.6 — Tool: buscar_noticias()
+## Difícil (Opus 4.6) TAREFA 2.6 — Tool: buscar_noticias()
 
 **Prompt para o agente:**
 ```
@@ -710,7 +710,7 @@ Adicionar evento shutdown para parar o scheduler graciosamente.
 
 ---
 
-## TAREFA 2.9 — Registrar tools no LangGraph
+## Muito difícil (Opus 4.6) TAREFA 2.9 — Registrar tools no LangGraph
 
 **Prompt para o agente:**
 ```
@@ -741,7 +741,7 @@ Use langchain_anthropic.ChatAnthropic como LLM base.
 
 ---
 
-## TAREFA 2.10 — Wake word com Porcupine
+## Difícil (Opus 4.6) TAREFA 2.10 — Wake word com Porcupine
 
 **Prompt para o agente:**
 ```
