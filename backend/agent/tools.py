@@ -9,12 +9,19 @@ Responsável por:
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 from loguru import logger
 
+
+class ToolInfo(TypedDict):
+    """Informações de uma tool registrada."""
+    function: Callable[..., Any]
+    description: str
+
+
 # Registro centralizado de tools
-TOOL_REGISTRY: dict[str, Callable[..., Any]] = {}
+TOOL_REGISTRY: dict[str, ToolInfo] = {}
 
 
 def register_tool(name: str, description: str) -> Callable:

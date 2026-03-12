@@ -174,7 +174,7 @@ Use type hints e docstrings em todas as funções.
 Crie o arquivo backend/agent/agent.py com as seguintes especificações:
 
 1. Criar uma classe ConversationAgent com:
-   - __init__(self): inicializa o cliente Anthropic usando ANTHROPIC_API_KEY do ambiente
+   - __init__(self): inicializa o cliente Anthropic usando ANTHROPIC_API_KEY(construir de maneira que permita trocar facilmente os provedores de IA e ate mesmo usar local) do ambiente
    - async def processar(self, mensagem: str, historico: list[dict]) -> str:
      → Chama a API do Claude (modelo: claude-sonnet-4-20250514, max_tokens: 1024)
      → Passa o histórico como messages anteriores
