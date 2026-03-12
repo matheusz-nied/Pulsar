@@ -77,11 +77,13 @@ assistente_local/
 O .env.example deve conter:
 ANTHROPIC_API_KEY=
 GOOGLE_CALENDAR_CREDENTIALS_PATH=
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
 TELEGRAM_BOT_TOKEN=
 PORCUPINE_ACCESS_KEY=
 OLLAMA_BASE_URL=http://localhost:11434
+BRAVE_SEARCH_API_KEY=
+NEWS_API_KEY=
+ALPHA_VANTAGE_KEY=
+GNEWS_API_KEY=
 
 O .gitignore deve ignorar: .env, __pycache__, *.pyc, /backend/audio_cache/*.mp3, /backend/memory/
 ```
@@ -129,8 +131,8 @@ playwright==1.44.0
 google-api-python-client==2.130.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.0
-spotipy==2.23.0
 python-telegram-bot==21.3
+feedparser==6.0.11
 
 # Logs
 loguru==0.7.2
@@ -379,38 +381,261 @@ Usar asyncio e websockets do FastAPI.
 
 ---
 
-## TAREFA 2.5 — Tool: busca_web()
+## TAREFA 2.5 — Tool: busca_web() com arquitetura trocável
 
 **Prompt para o agente:**
 ```
-Crie o arquivo backend/tools/web.py com a tool de busca web:
+Crie o arquivo backend/tools/web.py com arquitetura de provider pattern para busca:
 
-1. WHITELIST_DOMINIOS = [
+1. Interface base SearchProvider (classe abstrata):
+   from abc import ABC, abstractmethod
+   
+   class SearchProvider(ABC):
+       @abstractmethod
+       async def buscar(self, query: str, max_resultados: int) -> list[dict]:
+           """Retorna lista de dicts com campos: title, url, description"""
+           pass
+
+2. Implementar BraveSearchProvider(SearchProvider):
+   - Usar BRAVE_SEARCH_API_KEY do .env (os.getenv com fallback None)
+   - Endpoint: https://api.search.brave.com/res/v1/web/search
+   - Headers: {"Accept": "application/json", "X-Subscription-Token": API_KEY}
+   - Params: {"q": query, "count": max_resultados}
+   - try/except para capturar erros de API (loga e retorna lista vazia se falhar)
+   - Retornar lista de dicts: [{"title": ..., "url": ..., "description": ...}]
+
+3. Implementar DuckDuckGoProvider(SearchProvider) como fallback gratuito:
+   - Sem necessidade de chave de API
+   - URL: https://api.duckduckgo.com/?q={query}&format=json&no_html=1
+   - Parser a resposta e retornar formato padronizado
+   - try/except para garantir que não quebra o app
+
+4. Criar SearchService:
+   class SearchService:
+       def __init__(self):
+           # Detecta automaticamente qual provider usar
+           brave_key = os.getenv("BRAVE_SEARCH_API_KEY")
+           if brave_key:
+               self.provider = BraveSearchProvider(brave_key)
+               logger.info("SearchService usando BraveSearchProvider")
+           else:
+               self.provider = DuckDuckGoProvider()
+               logger.info("SearchService usando DuckDuckGoProvider (fallback gratuito)")
+       
+       def trocar_provider(self, provider: SearchProvider) -> None:
+           """Permite trocar provider em runtime"""
+           self.provider = provider
+           logger.info(f"Provider alterado para {provider.__class__.__name__}")
+       
+       async def buscar(self, query: str, max_resultados: int = 3) -> str:
+           """Retorna resultados formatados como string para o LLM"""
+           try:
+               resultados = await self.provider.buscar(query, max_resultados)
+               if not resultados:
+                   return "Nenhum resultado encontrado."
+               
+               # Formatar para texto
+               texto = "\n\n".join([
+                   f"**{r['title']}**\n{r['url']}\n{r.get('description', '')}" 
+                   for r in resultados
+               ])
+               return texto
+           except Exception as e:
+               logger.error(f"Erro na busca web: {e}")
+               return f"Erro ao buscar: {str(e)}"
+
+5. WHITELIST_DOMINIOS = [
      "wikipedia.org", "g1.globo.com", "bbc.com", "reuters.com",
      "weather.com", "openweathermap.org", "google.com/search"
    ]
 
-2. async def buscar_web(query: str, max_resultados: int = 3) -> str:
-   - Usa a biblioteca httpx para fazer busca via DuckDuckGo Instant Answer API
-   - URL: https://api.duckduckgo.com/?q={query}&format=json&no_html=1
-   - Retorna resumo dos resultados como string formatada
-   - Em caso de falha, tenta busca alternativa via requests no Google
-   - Loga a query e tempo de resposta
-
-3. async def resumir_pagina(url: str) -> str:
+6. async def resumir_pagina(url: str) -> str:
    - Verifica se domínio está na WHITELIST antes de acessar
    - Faz fetch do HTML com httpx
    - Extrai texto relevante (sem scripts/CSS) usando BeautifulSoup
    - Retorna os primeiros 2000 caracteres do conteúdo limpo
+   - try/except para não quebrar se página não carregar
 
-Adicionar ao requirements.txt: httpx, beautifulsoup4
+7. Criar instância global para uso nas tools:
+   search_service = SearchService()
+   
+   async def buscar_web(query: str, max_resultados: int = 3) -> str:
+       return await search_service.buscar(query, max_resultados)
+
+Adicionar ao requirements.txt: beautifulsoup4 (httpx já presente)
 ```
 
-**Critério de conclusão:** `await buscar_web("capital do Brasil")` retorna string com informação relevante.
+**Critério de conclusão:** 
+- Com BRAVE_SEARCH_API_KEY configurada: `await buscar_web("capital do Brasil")` usa Brave e retorna resultados
+- Sem a chave: usa DuckDuckGo automaticamente sem erro
+- Trocar para outro provider no futuro requer apenas criar nova classe que herda SearchProvider
+- App não quebra se ambos os serviços falharem (retorna mensagem de erro amigável)
 
 ---
 
-## TAREFA 2.6 — Tool: abrir_app()
+## TAREFA 2.6 — Tool: buscar_noticias()
+
+**Prompt para o agente:**
+```
+Crie o arquivo backend/tools/news.py com arquitetura de provider pattern para notícias:
+
+1. Interface base NewsProvider (classe abstrata):
+   from abc import ABC, abstractmethod
+   
+   class NewsProvider(ABC):
+       @abstractmethod
+       async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict]:
+           """Retorna lista de dicts com campos: title, description, url, source, published_at"""
+           pass
+
+2. Implementar NewsApiProvider(NewsProvider):
+   - Usar NEWS_API_KEY do .env (os.getenv com fallback None)
+   - Endpoint: https://newsapi.org/v2/everything
+   - Fontes fixadas por categoria:
+       CATEGORIAS_FONTES = {
+           "ia_tech": "techcrunch,the-verge,wired,ars-technica,hacker-news",
+           "financas": "bloomberg,financial-times,the-wall-street-journal",
+           "economia": "reuters,bbc-news,associated-press",
+           "software": "techcrunch,hacker-news,ars-technica"
+       }
+   - Params: {"apiKey": key, "sources": fontes, "q": query, "pageSize": max_resultados}
+   - Fallback: se fonte não disponível no plano gratuito, busca por keyword apenas
+   - try/except para capturar erros (retorna lista vazia se falhar)
+   - Retornar lista padronizada com campos: title, description, url, source, published_at
+
+3. Implementar RSSProvider(NewsProvider) para fontes brasileiras:
+   - Usar feedparser (sem necessidade de chave de API)
+   - Feeds por categoria:
+       FEEDS_BR = {
+           "financas_br": "https://valor.globo.com/rss/home",
+           "economia_br": "https://exame.com/feed",
+           "tech_br": "https://olhardigital.com.br/feed"
+       }
+   - Parser os feeds e retornar formato padronizado
+   - try/except para garantir que não quebra se feed estiver offline
+
+4. Implementar AlphaVantageProvider(NewsProvider) para finanças com sentiment:
+   - Usar ALPHA_VANTAGE_KEY do .env (os.getenv com fallback None)
+   - Endpoint: https://www.alphavantage.co/query?function=NEWS_SENTIMENT
+   - Params: {"apikey": key, "topics": "finance", "limit": max_resultados}
+   - Retornar campos extras: sentiment_score, sentiment_label (Bullish/Bearish/Neutral)
+   - try/except para não quebrar se API falhar
+
+5. Criar NewsService:
+   class NewsService:
+       def __init__(self):
+           # Detecta automaticamente providers disponíveis
+           self.providers = {}
+           
+           news_api_key = os.getenv("NEWS_API_KEY")
+           if news_api_key:
+               self.providers["newsapi"] = NewsApiProvider(news_api_key)
+               logger.info("NewsApiProvider disponível")
+           
+           alpha_key = os.getenv("ALPHA_VANTAGE_KEY")
+           if alpha_key:
+               self.providers["alphavantage"] = AlphaVantageProvider(alpha_key)
+               logger.info("AlphaVantageProvider disponível")
+           
+           # RSS sempre disponível (gratuito)
+           self.providers["rss"] = RSSProvider()
+           logger.info("RSSProvider disponível")
+       
+       async def buscar_por_categoria(self, categoria: str, query: str = "", max_resultados: int = 5) -> list[dict]:
+           """Roteia para o provider apropriado baseado na categoria"""
+           resultados = []
+           
+           try:
+               if categoria in ["ia", "tech", "software"]:
+                   if "newsapi" in self.providers:
+                       resultados = await self.providers["newsapi"].buscar(query, categoria, max_resultados)
+               
+               elif categoria == "financas":
+                   # Prefere Alpha Vantage se disponível (tem sentiment)
+                   if "alphavantage" in self.providers:
+                       resultados = await self.providers["alphavantage"].buscar(query, categoria, max_resultados)
+                   elif "newsapi" in self.providers:
+                       resultados = await self.providers["newsapi"].buscar(query, categoria, max_resultados)
+               
+               elif categoria == "economia":
+                   # Mescla NewsAPI + RSS
+                   if "newsapi" in self.providers:
+                       news_api_results = await self.providers["newsapi"].buscar(query, categoria, max_resultados // 2)
+                       resultados.extend(news_api_results)
+                   
+                   rss_results = await self.providers["rss"].buscar(query, "economia_br", max_resultados // 2)
+                   resultados.extend(rss_results)
+               
+               elif categoria == "brasil":
+                   # Apenas RSS (fontes brasileiras)
+                   resultados = await self.providers["rss"].buscar(query, "tech_br", max_resultados)
+               
+               else:  # "geral"
+                   # Tenta qualquer provider disponível
+                   for provider_name, provider in self.providers.items():
+                       try:
+                           results = await provider.buscar(query, categoria, max_resultados)
+                           if results:
+                               resultados = results
+                               break
+                       except Exception as e:
+                           logger.warning(f"Provider {provider_name} falhou: {e}")
+                           continue
+           
+           except Exception as e:
+               logger.error(f"Erro ao buscar notícias: {e}")
+           
+           return resultados[:max_resultados]
+       
+       def formatar_para_llm(self, noticias: list[dict]) -> str:
+           """Formata as notícias como texto estruturado para injetar no contexto do LLM"""
+           if not noticias:
+               return "Nenhuma notícia encontrada."
+           
+           linhas = []
+           for noticia in noticias:
+               sentiment = ""
+               if "sentiment_label" in noticia:
+                   sentiment = f" [{noticia['sentiment_label']}]"
+               
+               linha = f"📰 [{noticia['source']}] {noticia['title']}{sentiment}\n   {noticia.get('description', '')}\n   {noticia.get('published_at', '')}\n"
+               linhas.append(linha)
+           
+           return "\n".join(linhas)
+
+6. Registrar como tool no LangGraph (em backend/agent/tools.py ou agent.py):
+   news_service = NewsService()
+   
+   async def buscar_noticias(categoria: str = "geral", query: str = "") -> str:
+       """Busca notícias recentes.
+       
+       Args:
+           categoria: Uma de: ia, tech, financas, economia, software, brasil, geral
+           query: Termo de busca opcional
+       
+       Returns:
+           String formatada com as notícias encontradas
+       """
+       try:
+           noticias = await news_service.buscar_por_categoria(categoria, query)
+           return news_service.formatar_para_llm(noticias)
+       except Exception as e:
+           logger.error(f"Erro na tool buscar_noticias: {e}")
+           return f"Não foi possível buscar notícias no momento: {str(e)}"
+
+Adicionar ao requirements.txt: feedparser==6.0.11
+```
+
+**Critério de conclusão:**
+- "Quais as notícias de IA hoje?" → retorna lista formatada de notícias tech sem quebrar
+- "Como está o mercado financeiro?" → retorna notícias com sentiment quando Alpha Vantage configurado
+- "Notícias do Brasil" → retorna feeds RSS brasileiros sem necessidade de chave
+- Trocar ou adicionar provider no futuro requer apenas criar nova classe que herda NewsProvider
+- **App não quebra se nenhum serviço de notícias estiver configurado ou se todos falharem** (retorna mensagem amigável)
+
+---
+
+## TAREFA 2.7 — Tool: abrir_app()
 
 **Prompt para o agente:**
 ```
@@ -423,7 +648,6 @@ Crie no arquivo backend/tools/system.py as seguintes tools:
      "vscode": ["code", "code.exe"],
      "terminal": ["gnome-terminal", "xterm", "cmd.exe"],
      "calculadora": ["gnome-calculator", "calc.exe"],
-     "spotify": ["spotify", "Spotify.exe"]
    }
 
 2. async def abrir_app(nome: str) -> str:
@@ -451,7 +675,7 @@ Adicionar ao requirements.txt: psutil
 
 ---
 
-## TAREFA 2.7 — Tool: definir_alarme()
+## TAREFA 2.8 — Tool: definir_alarme()
 
 **Prompt para o agente:**
 ```
@@ -486,17 +710,18 @@ Adicionar evento shutdown para parar o scheduler graciosamente.
 
 ---
 
-## TAREFA 2.8 — Registrar tools no LangGraph
+## TAREFA 2.9 — Registrar tools no LangGraph
 
 **Prompt para o agente:**
 ```
 Atualize backend/agent/agent.py para usar LangGraph com as tools criadas:
 
-1. Importar as tools: buscar_web, abrir_app, definir_alarme de seus módulos
+1. Importar as tools: buscar_web, buscar_noticias, abrir_app, definir_alarme de seus módulos
 
 2. Criar as definições de tool para o LangGraph:
    tools = [
      StructuredTool.from_function(buscar_web, name="buscar_web", description="Busca informações na web. Use quando o usuário pedir para pesquisar algo."),
+     StructuredTool.from_function(buscar_noticias, name="buscar_noticias", description="Busca notícias recentes por categoria (ia, tech, financas, economia, software, brasil). Use quando o usuário pedir notícias ou informações sobre mercado/economia."),
      StructuredTool.from_function(abrir_app, name="abrir_app", description="Abre um aplicativo no computador. Use quando o usuário pedir para abrir um programa."),
      StructuredTool.from_function(definir_alarme, name="definir_alarme", description="Define um alarme ou lembrete. Use quando o usuário pedir para ser lembrado de algo.")
    ]
@@ -512,11 +737,11 @@ Atualize backend/agent/agent.py para usar LangGraph com as tools criadas:
 Use langchain_anthropic.ChatAnthropic como LLM base.
 ```
 
-**Critério de conclusão:** "Pesquisa sobre Python" aciona `buscar_web`. "Abra o Firefox" aciona `abrir_app`. "Me lembre às 15h de tomar água" aciona `definir_alarme`.
+**Critério de conclusão:** "Pesquisa sobre Python" aciona `buscar_web`. "Quais as notícias de tecnologia?" aciona `buscar_noticias`. "Abra o Firefox" aciona `abrir_app`. "Me lembre às 15h de tomar água" aciona `definir_alarme`.
 
 ---
 
-## TAREFA 2.9 — Wake word com Porcupine
+## TAREFA 2.10 — Wake word com Porcupine
 
 **Prompt para o agente:**
 ```
@@ -686,36 +911,61 @@ Crie o arquivo backend/tools/music.py:
      → Inicia Playwright em modo headed (visível)
      → Abre YouTube Music (music.youtube.com)
      → Aguarda carregamento
+     → try/except para capturar erros de inicialização
    
    - async def tocar(self, query: str) -> str:
      → Busca a música/artista na barra de pesquisa
      → Clica no primeiro resultado
      → Retorna nome do que está tocando
+     → try/except para tratar falhas (ex: sem conexão, página mudou)
    
    - async def pausar(self) -> str:
      → Encontra e clica no botão de pause
+     → try/except para capturar se botão não encontrado
    
    - async def proximo(self) -> str:
      → Clica no botão next track
+     → try/except para tratar erros
    
    - async def volume(self, nivel: int) -> str:
      → Ajusta volume via slider da página
+     → try/except para garantir que não quebra
 
-2. Classe SpotifyController (usando API oficial):
-   - Requer SPOTIFY_CLIENT_ID e SPOTIFY_CLIENT_SECRET no .env
-   - async def tocar(self, query: str) -> str: busca e toca via Spotipy
-   - async def pausar(self) -> str
-   - async def proximo(self) -> str
-
-3. Criar função roteadora:
+2. Criar função principal de controle:
+   youtube_controller = YoutubeMusicController()
+   
    async def controlar_musica(acao: str, query: str = "") -> str:
-   → Tenta Spotify primeiro (se configurado), fallback para YouTube Music
-   → ações: "tocar", "pausar", "proximo", "volume:{0-100}"
+       """Controla reprodução de música via YouTube Music.
+       
+       Args:
+           acao: Uma de: tocar, pausar, proximo, volume
+           query: Nome da música/artista (para acao=tocar) ou nível 0-100 (para acao=volume)
+       
+       Returns:
+           Mensagem de status da ação
+       """
+       try:
+           if acao == "tocar":
+               return await youtube_controller.tocar(query)
+           elif acao == "pausar":
+               return await youtube_controller.pausar()
+           elif acao == "proximo":
+               return await youtube_controller.proximo()
+           elif acao.startswith("volume"):
+               nivel = int(query) if query else 50
+               return await youtube_controller.volume(nivel)
+           else:
+               return f"Ação '{acao}' não reconhecida. Use: tocar, pausar, proximo, volume"
+       except Exception as e:
+           logger.error(f"Erro ao controlar música: {e}")
+           return f"Não foi possível controlar a música: {str(e)}"
 
-4. Registrar como tool no LangGraph
+3. Registrar como tool no LangGraph
 ```
 
-**Critério de conclusão:** "Toca uma música do Coldplay" → música toca no Spotify ou YouTube Music.
+**Critério de conclusão:** 
+- "Toca uma música do Coldplay" → música toca no YouTube Music
+- **App não quebra se YouTube Music falhar ou Playwright não estiver instalado** (retorna mensagem de erro amigável)
 
 ---
 
@@ -945,7 +1195,7 @@ Crie o arquivo README.md completo com:
 ```
 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6 → 1.7
                 ↓
-2.1 → 2.2 → 2.3 → 2.5 → 2.6 → 2.7 → 2.8 → 2.4 → 2.9
+2.1 → 2.2 → 2.3 → 2.5 → 2.6 → 2.7 → 2.8 → 2.9 → 2.4 → 2.10
                 ↓
 3.2 → 3.1 → 3.3 → 3.4 → 3.5
                 ↓
