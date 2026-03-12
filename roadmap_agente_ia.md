@@ -39,7 +39,7 @@ Regras gerais:
 
 ---
 
-## TAREFA 1.1 — Estrutura de pastas e ambiente
+## TAREFA Feita - 1.1 — Estrutura de pastas e ambiente
 
 **Prompt para o agente:**
 ```
@@ -89,7 +89,7 @@ O .gitignore deve ignorar: .env, __pycache__, *.pyc, /backend/audio_cache/*.mp3,
 
 ---
 
-## TAREFA 1.2 — requirements.txt
+## Feita - TAREFA 1.2 — requirements.txt
 
 **Prompt para o agente:**
 ```
@@ -143,7 +143,7 @@ httpx==0.27.0
 
 ---
 
-## TAREFA 1.3 — main.py (FastAPI base)
+## Feita - TAREFA 1.3 — main.py (FastAPI base)
 
 **Prompt para o agente:**
 ```
@@ -167,7 +167,7 @@ Use type hints e docstrings em todas as funções.
 
 ---
 
-## TAREFA 1.4 — Integração Claude API no agente
+## Feita - TAREFA 1.4 — Integração Claude API no agente
 
 **Prompt para o agente:**
 ```
