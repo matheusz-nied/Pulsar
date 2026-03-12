@@ -195,7 +195,7 @@ Não use LangGraph ainda — apenas o cliente Anthropic diretamente.
 
 ---
 
-## TAREFA 1.5 — Memória de sessão simples
+## Feita TAREFA 1.5 — Memória de sessão simples
 
 **Prompt para o agente:**
 ```

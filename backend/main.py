@@ -33,6 +33,10 @@ from pydantic import BaseModel
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
+# Backend imports (precisam do .env carregado para inicializar o agente)
+from backend.agent.agent import agent  # noqa: E402
+from backend.agent.memory import persistent_memory, session_memory  # noqa: E402
+
 
 # --- Configuração do Loguru ---
 
@@ -89,26 +93,6 @@ class HealthResponse(BaseModel):
 class ErrorResponse(BaseModel):
     """Modelo de resposta de erro."""
     detail: str
-
-
-# --- Funções Placeholder ---
-
-async def processar_mensagem(mensagem: str, session_id: str) -> str:
-    """
-    Processa uma mensagem do usuário (placeholder).
-
-    Será substituída pela integração real com LangGraph + Claude
-    na próxima fase do projeto.
-
-    Args:
-        mensagem: Texto enviado pelo usuário.
-        session_id: ID da sessão de conversa.
-
-    Returns:
-        Resposta gerada pelo agente.
-    """
-    logger.info(f"Processando mensagem na sessão {session_id}: {mensagem[:80]}...")
-    return f"Processando: {mensagem}"
 
 
 # --- Lifecycle ---
@@ -250,8 +234,22 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
     session_id = request.session_id or str(uuid.uuid4())
 
     try:
-        resposta = await processar_mensagem(request.mensagem, session_id)
+        # a. Carregar histórico da sessão
+        historico = session_memory.get_history(session_id)
+
+        # b. Chamar agente com mensagem e histórico
+        resposta = await agent.processar(request.mensagem, historico)  # type: ignore[arg-type]
+
+        # c. Adicionar mensagem do usuário E resposta do agente ao histórico
+        session_memory.add_message(session_id, "user", request.mensagem)
+        session_memory.add_message(session_id, "assistant", resposta)
+
+        # d. Persistir histórico atualizado
+        persistent_memory.save(session_id, session_memory.get_history(session_id))
+
+        # e. Retornar resposta com session_id
         return ConversarResponse(resposta=resposta, session_id=session_id)
+
     except Exception as e:
         logger.error(f"Erro ao processar mensagem na sessão {session_id}: {e}")
         raise HTTPException(
