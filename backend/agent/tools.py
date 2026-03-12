@@ -45,6 +45,22 @@ def register_tool(name: str, description: str) -> Callable:
     return decorator
 
 
+def _register_builtin_tools() -> None:
+    """Registra as tools internas do agente."""
+    from backend.tools.news import buscar_noticias
+
+    register_tool(
+        name="buscar_noticias",
+        description=(
+            "Busca notícias recentes. Categorias: ia, tech, financas, economia, "
+            "software, brasil, geral. Aceita query opcional para filtrar resultados."
+        ),
+    )(buscar_noticias)
+
+
+_register_builtin_tools()
+
+
 def get_available_tools() -> list[dict[str, str]]:
     """
     Retorna a lista de tools disponíveis.

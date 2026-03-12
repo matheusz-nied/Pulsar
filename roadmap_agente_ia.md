@@ -353,7 +353,7 @@ Toda a rota deve ser async.
 
 ---
 
-## Muito difícil (Opus 4.6) TAREFA 2.4 — WebSocket /ws/audio (streaming)
+## Feita - Muito difícil (Opus 4.6) TAREFA 2.4 — WebSocket /ws/audio (streaming)
 
 **Prompt para o agente:**
 ```
@@ -381,7 +381,7 @@ Usar asyncio e websockets do FastAPI.
 
 ---
 
-## TAREFA 2.5 — Tool: busca_web() com arquitetura trocável
+## Feita - TAREFA 2.5 — Tool: busca_web() com arquitetura trocável
 
 **Prompt para o agente:**
 ```
@@ -473,7 +473,7 @@ Adicionar ao requirements.txt: beautifulsoup4 (httpx já presente)
 
 ---
 
-## Difícil (Opus 4.6) TAREFA 2.6 — Tool: buscar_noticias()
+## Feita - Difícil (Opus 4.6) TAREFA 2.6 — Tool: buscar_noticias()
 
 **Prompt para o agente:**
 ```
