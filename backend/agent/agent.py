@@ -15,7 +15,14 @@ from typing import Any, Protocol
 
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, TextBlock
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.tools import StructuredTool
+from langgraph.graph import StateGraph
+from langgraph.graph.message import MessagesState
+from langgraph.prebuilt import ToolNode, tools_condition
 from loguru import logger
+from pydantic import SecretStr
 
 
 class LLMProvider(Protocol):
@@ -125,30 +132,200 @@ class ClaudeProvider:
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
 
-class ConversationAgent:
-    """Agente de conversação principal."""
+# ============================================================================
+# TOOLS PARA O LANGGRAPH
+# ============================================================================
 
-    def __init__(self, provider: LLMProvider | None = None) -> None:
+SYSTEM_PROMPT = (
+    "Você é um assistente virtual local chamado Pulsar. "
+    "Você é direto, eficiente e responde em português brasileiro. "
+    "Quando não souber algo, diz claramente. "
+    "Você tem acesso a tools para buscar na web, buscar notícias, "
+    "abrir aplicativos e definir alarmes. Use-as quando necessário."
+)
+
+
+def _criar_tools() -> list[StructuredTool]:
+    """
+    Cria as tools formatadas para uso no LangGraph.
+
+    Returns:
+        Lista de StructuredTool prontas para binding com o LLM.
+    """
+    from backend.tools.news import buscar_noticias
+    from backend.tools.system import abrir_app, definir_alarme
+    from backend.tools.web import buscar_web
+
+    return [
+        StructuredTool.from_function(
+            coroutine=buscar_web,
+            name="buscar_web",
+            description=(
+                "Busca informações na web. "
+                "Use quando o usuário pedir para pesquisar algo."
+            ),
+        ),
+        StructuredTool.from_function(
+            coroutine=buscar_noticias,
+            name="buscar_noticias",
+            description=(
+                "Busca notícias recentes por categoria "
+                "(ia, tech, financas, economia, software, brasil). "
+                "Use quando o usuário pedir notícias ou informações "
+                "sobre mercado/economia."
+            ),
+        ),
+        StructuredTool.from_function(
+            coroutine=abrir_app,
+            name="abrir_app",
+            description=(
+                "Abre um aplicativo no computador. "
+                "Use quando o usuário pedir para abrir um programa."
+            ),
+        ),
+        StructuredTool.from_function(
+            coroutine=definir_alarme,
+            name="definir_alarme",
+            description=(
+                "Define um alarme ou lembrete para um horário específico. "
+                "Use quando o usuário pedir para ser lembrado de algo. "
+                "Formatos aceitos: 'HH:MM' ou 'HH:MM DD/MM/YYYY'."
+            ),
+        ),
+    ]
+
+
+def _construir_grafo(
+    llm_with_tools: Any,
+    tools: list[StructuredTool],
+) -> Any:
+    """
+    Constrói o grafo do LangGraph com nós LLM e Tools.
+
+    Fluxo:
+        START → llm → (tool_call?) → tools → llm → ... → END
+
+    Args:
+        llm_with_tools: LLM com tools vinculadas.
+        tools: Lista de tools para o ToolNode.
+
+    Returns:
+        Grafo compilado do LangGraph.
+    """
+    async def llm_node(state: MessagesState) -> dict[str, list[Any]]:
+        """Nó LLM: chama Claude com as tools disponíveis."""
+        response = await llm_with_tools.ainvoke(state["messages"])
+        return {"messages": [response]}
+
+    graph = StateGraph(MessagesState)
+    graph.add_node("llm", llm_node)
+    graph.add_node("tools", ToolNode(tools))
+    graph.set_entry_point("llm")
+    graph.add_conditional_edges("llm", tools_condition)
+    graph.add_edge("tools", "llm")
+
+    return graph.compile()
+
+
+# ============================================================================
+# AGENTE DE CONVERSAÇÃO COM LANGGRAPH
+# ============================================================================
+
+class ConversationAgent:
+    """Agente de conversação principal com suporte a LangGraph e tools."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "claude-sonnet-4-20250514",
+        provider: LLMProvider | None = None,
+    ) -> None:
         """
         Inicializa o agente de conversação.
 
+        Modo LangGraph (padrão): Usa ChatAnthropic + tools via grafo LangGraph.
+        Modo Legacy: Usa um provider direto sem suporte a tools.
+
         Args:
-            provider: Provedor de LLM a ser usado. Se None, usa ClaudeProvider.
+            api_key: Chave de API da Anthropic (modo LangGraph).
+            model: Modelo do Claude a ser usado (modo LangGraph).
+            provider: Provedor de LLM legado. Se fornecido, desativa LangGraph.
         """
-        if provider is None:
-            api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.system_prompt = SYSTEM_PROMPT
+
+        if provider is not None:
+            # Modo legacy: provider direto, sem tools
+            self._use_langgraph = False
+            self.provider = provider
+            logger.info(
+                f"ConversationAgent inicializado (legacy, "
+                f"provider={provider.__class__.__name__})"
+            )
+        else:
+            # Modo LangGraph: ChatAnthropic + tools
+            self._use_langgraph = True
+
+            if api_key is None:
+                api_key = os.getenv("ANTHROPIC_API_KEY")
             if not api_key:
                 raise ValueError(
                     "ANTHROPIC_API_KEY não encontrada nas variáveis de ambiente"
                 )
-            provider = ClaudeProvider(api_key=api_key)
 
-        self.provider = provider
-        logger.info("ConversationAgent inicializado")
+            self.llm = ChatAnthropic( 
+                model_name=model, 
+    api_key=SecretStr(api_key),
+                max_tokens_to_sample=1024, 
+                timeout=30.0,
+                stop=None,
+            )
+            self.tools = _criar_tools()
+            self.llm_with_tools = self.llm.bind_tools(self.tools)
+            self.graph = _construir_grafo(self.llm_with_tools, self.tools)
 
-    async def processar(self, mensagem: str, historico: list[MessageParam]) -> str:
+            logger.info(
+                f"ConversationAgent inicializado com LangGraph "
+                f"(model={model}, tools={len(self.tools)})"
+            )
+
+    def _converter_historico(
+        self,
+        mensagem: str,
+        historico: list[dict[str, str]],
+    ) -> list[SystemMessage | HumanMessage | AIMessage]:
         """
-        Processa uma mensagem do usuário e retorna a resposta do agente.
+        Converte o histórico e mensagem para formato LangChain.
+
+        Args:
+            mensagem: Mensagem atual do usuário.
+            historico: Lista de mensagens anteriores.
+
+        Returns:
+            Lista de mensagens LangChain.
+        """
+        messages: list[SystemMessage | HumanMessage | AIMessage] = [
+            SystemMessage(content=self.system_prompt),
+        ]
+
+        for msg in historico:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            else:
+                messages.append(AIMessage(content=content))
+
+        messages.append(HumanMessage(content=mensagem))
+        return messages
+
+    async def processar(
+        self, mensagem: str, historico: list[dict[str, str]]
+    ) -> str:
+        """
+        Processa uma mensagem do usuário pelo grafo LangGraph.
+
+        O LLM decide se precisa chamar uma tool ou responder diretamente.
+        Se chamar uma tool, o resultado é passado de volta ao LLM.
 
         Args:
             mensagem: Mensagem atual do usuário.
@@ -164,19 +341,42 @@ class ConversationAgent:
         logger.info(f"Processando mensagem: {mensagem[:50]}...")
 
         try:
-            resposta = await self.provider.gerar_resposta(mensagem, historico)
-            logger.debug(f"Resposta gerada: {resposta[:50]}...")
-            return resposta
+            if not self._use_langgraph:
+                resposta = await self.provider.gerar_resposta(mensagem, historico)  # type: ignore[arg-type]
+                logger.debug(f"Resposta gerada (legacy): {resposta[:50]}...")
+                return resposta
+
+            messages = self._converter_historico(mensagem, historico)
+            result = await self.graph.ainvoke({"messages": messages})
+
+            # Extrair a última mensagem do AI (sem tool_calls)
+            for msg in reversed(result["messages"]):
+                if (
+                    isinstance(msg, AIMessage)
+                    and msg.content
+                    and not msg.tool_calls
+                ):
+                    resposta = (
+                        msg.content
+                        if isinstance(msg.content, str)
+                        else str(msg.content)
+                    )
+                    logger.debug(f"Resposta gerada: {resposta[:50]}...")
+                    return resposta
+
+            return "Não foi possível gerar uma resposta."
 
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}")
-            raise
+            raise RuntimeError(
+                f"Não foi possível processar sua mensagem. Erro: {str(e)}"
+            ) from e
 
     async def processar_stream(
-        self, mensagem: str, historico: list[MessageParam]
+        self, mensagem: str, historico: list[dict[str, str]]
     ) -> AsyncIterator[str]:
         """
-        Processa uma mensagem em modo streaming.
+        Processa uma mensagem em modo streaming pelo grafo LangGraph.
 
         Args:
             mensagem: Mensagem atual do usuário.
@@ -191,12 +391,30 @@ class ConversationAgent:
         logger.info(f"Processando mensagem (stream): {mensagem[:50]}...")
 
         try:
-            async for chunk in self.provider.gerar_resposta_stream(mensagem, historico):
-                yield chunk
+            if not self._use_langgraph:
+                async for chunk in self.provider.gerar_resposta_stream(mensagem, historico):  # type: ignore[arg-type]
+                    yield chunk
+                return
+
+            messages = self._converter_historico(mensagem, historico)
+
+            async for event in self.graph.astream_events(
+                {"messages": messages}, version="v2"
+            ):
+                if event["event"] == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    if (
+                        isinstance(chunk.content, str)
+                        and chunk.content
+                        and not getattr(chunk, "tool_call_chunks", None)
+                    ):
+                        yield chunk.content
 
         except Exception as e:
             logger.error(f"Erro ao processar mensagem (stream): {e}")
-            raise
+            raise RuntimeError(
+                f"Não foi possível processar sua mensagem. Erro: {str(e)}"
+            ) from e
 
 
 class GeminiProvider:
@@ -421,6 +639,9 @@ def create_agent_from_config(provider_name: str | None = None) -> ConversationAg
     """
     Cria um agente baseado no nome do provider.
 
+    Para "claude": usa LangGraph com ChatAnthropic + tools (recomendado).
+    Para outros providers: usa modo legacy sem suporte a tools.
+
     Args:
         provider_name: Nome do provider ("claude", "gemini", "openai", "deepseek", "ollama").
                       Se None, usa a variável de ambiente LLM_PROVIDER (padrão: "claude").
@@ -447,13 +668,15 @@ def create_agent_from_config(provider_name: str | None = None) -> ConversationAg
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY não configurada no .env")
-        return ConversationAgent(provider=ClaudeProvider(api_key=api_key))
+        model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+        return ConversationAgent(api_key=api_key, model=model)
 
     elif provider_name == "gemini":
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY não configurada no .env")
         model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+        logger.warning("Gemini: modo legacy sem suporte a tools do LangGraph")
         return ConversationAgent(provider=GeminiProvider(api_key=api_key, model=model))
 
     elif provider_name == "openai":
@@ -461,6 +684,7 @@ def create_agent_from_config(provider_name: str | None = None) -> ConversationAg
         if not api_key:
             raise ValueError("OPENAI_API_KEY não configurada no .env")
         model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        logger.warning("OpenAI: modo legacy sem suporte a tools do LangGraph")
         return ConversationAgent(provider=OpenAIProvider(api_key=api_key, model=model))
 
     elif provider_name == "deepseek":
@@ -468,11 +692,13 @@ def create_agent_from_config(provider_name: str | None = None) -> ConversationAg
         if not api_key:
             raise ValueError("DEEPSEEK_API_KEY não configurada no .env")
         model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        logger.warning("DeepSeek: modo legacy sem suporte a tools do LangGraph")
         return ConversationAgent(provider=DeepSeekProvider(api_key=api_key, model=model))
 
     elif provider_name == "ollama":
         model = os.getenv("OLLAMA_MODEL", "gemma3:4b-it-qat")
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        logger.warning("Ollama: modo legacy sem suporte a tools do LangGraph")
         return ConversationAgent(provider=OllamaProvider(model=model, base_url=base_url))
 
     else:
