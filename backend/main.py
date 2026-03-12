@@ -11,6 +11,8 @@ Responsável por:
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import sys
 import uuid
@@ -20,7 +22,7 @@ from typing import Any, AsyncGenerator
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
@@ -447,6 +449,145 @@ async def servir_audio(filename: str) -> FileResponse:
         media_type="audio/mpeg",
         filename=filename,
     )
+
+
+# --- WebSocket ---
+
+@app.websocket("/ws/audio")
+async def websocket_audio(ws: WebSocket) -> None:
+    """
+    WebSocket para processamento de áudio em streaming.
+
+    Protocolo de mensagens (JSON):
+    - Cliente envia: {"type": "audio_chunk", "data": "<base64>", "session_id": "<id>"}
+    - Cliente envia: {"type": "audio_end", "session_id": "<id>"}
+    - Servidor responde: {"type": "transcricao", "texto": str}
+    - Servidor responde: {"type": "resposta_chunk", "texto": str}
+    - Servidor responde: {"type": "audio_ready", "url": str}
+    - Servidor responde: {"type": "erro", "mensagem": str}
+    """
+    await ws.accept()
+    logger.info("WebSocket /ws/audio: conexão aceita")
+
+    audio_buffer: bytearray = bytearray()
+    session_id: str = str(uuid.uuid4())
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                await ws.send_json({"type": "erro", "mensagem": "JSON inválido"})
+                continue
+
+            msg_type = msg.get("type")
+
+            # Atualiza session_id se fornecido
+            if msg.get("session_id"):
+                session_id = msg["session_id"]
+
+            # --- audio_chunk: acumular dados ---
+            if msg_type == "audio_chunk":
+                data_b64 = msg.get("data", "")
+                if not data_b64:
+                    await ws.send_json(
+                        {"type": "erro", "mensagem": "Campo 'data' vazio no audio_chunk"}
+                    )
+                    continue
+                try:
+                    audio_buffer.extend(base64.b64decode(data_b64))
+                except Exception:
+                    await ws.send_json(
+                        {"type": "erro", "mensagem": "Base64 inválido no campo 'data'"}
+                    )
+                    continue
+
+            # --- audio_end: processar pipeline completa ---
+            elif msg_type == "audio_end":
+                if not audio_buffer:
+                    await ws.send_json(
+                        {"type": "erro", "mensagem": "Nenhum áudio recebido antes de audio_end"}
+                    )
+                    continue
+
+                temp_audio_path: Path | None = None
+                try:
+                    # 1. Salvar áudio temporário
+                    temp_filename = f"ws_input_{uuid.uuid4()}.wav"
+                    temp_audio_path = Path("/tmp") / temp_filename
+                    temp_audio_path.write_bytes(bytes(audio_buffer))
+                    audio_buffer.clear()
+
+                    logger.info(
+                        f"WS audio_end: {temp_audio_path.stat().st_size} bytes "
+                        f"(session={session_id})"
+                    )
+
+                    # 2. Transcrever (STT)
+                    stt = get_stt(model_size="base")
+                    transcricao = await stt.transcrever(str(temp_audio_path))
+
+                    await ws.send_json({"type": "transcricao", "texto": transcricao})
+                    logger.info(f"WS transcricao: {transcricao[:80]}...")
+
+                    # 3. Processar com agente (streaming)
+                    historico = session_memory.get_history(session_id)
+                    resposta_completa = ""
+
+                    async for chunk in agent.processar_stream(transcricao, historico):
+                        resposta_completa += chunk
+                        await ws.send_json({"type": "resposta_chunk", "texto": chunk})
+
+                    logger.info(f"WS resposta completa: {resposta_completa[:80]}...")
+
+                    # 4. Atualizar histórico
+                    session_memory.add_message(session_id, "user", transcricao)
+                    session_memory.add_message(session_id, "assistant", resposta_completa)
+                    persistent_memory.save(
+                        session_id, session_memory.get_history(session_id)
+                    )
+
+                    # 5. Sintetizar resposta (TTS)
+                    tts = get_tts()
+                    audio_path = await tts.sintetizar(resposta_completa)
+                    audio_filename = Path(audio_path).name
+
+                    await ws.send_json(
+                        {"type": "audio_ready", "url": f"/audio/{audio_filename}"}
+                    )
+
+                    logger.success(
+                        f"WS pipeline concluída (session={session_id}): "
+                        f"audio={audio_filename}"
+                    )
+
+                except Exception as e:
+                    logger.error(f"WS erro no pipeline: {e}")
+                    await ws.send_json(
+                        {"type": "erro", "mensagem": f"Erro no processamento: {str(e)}"}
+                    )
+                finally:
+                    if temp_audio_path and temp_audio_path.exists():
+                        try:
+                            temp_audio_path.unlink()
+                        except Exception:
+                            pass
+
+            else:
+                await ws.send_json(
+                    {"type": "erro", "mensagem": f"Tipo de mensagem desconhecido: {msg_type}"}
+                )
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket /ws/audio: desconectado (session={session_id})")
+    except Exception as e:
+        logger.error(f"WebSocket /ws/audio erro: {e}")
+        try:
+            await ws.send_json({"type": "erro", "mensagem": str(e)})
+        except Exception:
+            pass
 
 
 # --- Entrypoint ---

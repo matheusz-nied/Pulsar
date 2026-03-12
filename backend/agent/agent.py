@@ -10,6 +10,7 @@ Responsável por:
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from anthropic import AsyncAnthropic
@@ -24,6 +25,12 @@ class LLMProvider(Protocol):
         self, mensagem: str, historico: list[MessageParam]
     ) -> str:
         """Gera uma resposta usando o provedor de LLM."""
+        ...
+
+    def gerar_resposta_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """Gera uma resposta em streaming usando o provedor de LLM."""
         ...
 
 
@@ -84,6 +91,39 @@ class ClaudeProvider:
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
 
+    async def gerar_resposta_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """
+        Gera resposta em streaming usando a API do Claude.
+
+        Args:
+            mensagem: Mensagem atual do usuário.
+            historico: Lista de mensagens anteriores.
+
+        Yields:
+            Chunks de texto da resposta conforme são gerados.
+
+        Raises:
+            RuntimeError: Se houver erro na chamada da API.
+        """
+        try:
+            messages: list[MessageParam] = historico + [{"role": "user", "content": mensagem}]
+
+            async with self.client.messages.stream(
+                model=self.model,
+                max_tokens=1024,
+                system=self.system_prompt,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+
+        except Exception as e:
+            logger.error(f"Erro no streaming Claude API: {e}")
+            raise RuntimeError(
+                f"Não foi possível processar sua mensagem. Erro: {str(e)}"
+            ) from e
 
 class ConversationAgent:
     """Agente de conversação principal."""
@@ -132,6 +172,32 @@ class ConversationAgent:
             logger.error(f"Erro ao processar mensagem: {e}")
             raise
 
+    async def processar_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """
+        Processa uma mensagem em modo streaming.
+
+        Args:
+            mensagem: Mensagem atual do usuário.
+            historico: Lista de mensagens anteriores.
+
+        Yields:
+            Chunks de texto da resposta conforme são gerados.
+
+        Raises:
+            RuntimeError: Se houver erro no processamento.
+        """
+        logger.info(f"Processando mensagem (stream): {mensagem[:50]}...")
+
+        try:
+            async for chunk in self.provider.gerar_resposta_stream(mensagem, historico):
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"Erro ao processar mensagem (stream): {e}")
+            raise
+
 
 class GeminiProvider:
     """Provedor de LLM usando Google Gemini API."""
@@ -175,6 +241,13 @@ class GeminiProvider:
             raise RuntimeError(
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
+
+    async def gerar_resposta_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """Fallback: gera resposta completa e yield como chunk único."""
+        resposta = await self.gerar_resposta(mensagem, historico)
+        yield resposta
 
 
 class OpenAIProvider:
@@ -223,6 +296,13 @@ class OpenAIProvider:
             raise RuntimeError(
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
+
+    async def gerar_resposta_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """Fallback: gera resposta completa e yield como chunk único."""
+        resposta = await self.gerar_resposta(mensagem, historico)
+        yield resposta
 
 
 class DeepSeekProvider:
@@ -274,6 +354,13 @@ class DeepSeekProvider:
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
 
+    async def gerar_resposta_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """Fallback: gera resposta completa e yield como chunk único."""
+        resposta = await self.gerar_resposta(mensagem, historico)
+        yield resposta
+
 
 class OllamaProvider:
     """Provedor de LLM local usando Ollama."""
@@ -321,6 +408,13 @@ class OllamaProvider:
             raise RuntimeError(
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
+
+    async def gerar_resposta_stream(
+        self, mensagem: str, historico: list[MessageParam]
+    ) -> AsyncIterator[str]:
+        """Fallback: gera resposta completa e yield como chunk único."""
+        resposta = await self.gerar_resposta(mensagem, historico)
+        yield resposta
 
 
 def create_agent_from_config(provider_name: str | None = None) -> ConversationAgent:
