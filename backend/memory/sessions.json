@@ -1,0 +1,284 @@
+{
+  "test_persistent_001": [
+    {
+      "role": "user",
+      "content": "Mensagem 1"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta 1"
+    },
+    {
+      "role": "user",
+      "content": "Mensagem 2"
+    }
+  ],
+  "test_integration_001": [
+    {
+      "role": "user",
+      "content": "Primeira mensagem"
+    },
+    {
+      "role": "assistant",
+      "content": "Primeira resposta"
+    },
+    {
+      "role": "user",
+      "content": "Segunda mensagem"
+    }
+  ],
+  "2475e323-f9a6-4832-957f-9ca6b8e722ed": [
+    {
+      "role": "user",
+      "content": "Qual é a capital do Brasil?"
+    },
+    {
+      "role": "assistant",
+      "content": "Brasília."
+    },
+    {
+      "role": "user",
+      "content": "E qual é a população dessa cidade?"
+    },
+    {
+      "role": "assistant",
+      "content": "A população estimada de Brasília em 2023 é de aproximadamente 3.0 milhões de habitantes."
+    }
+  ],
+  "37e06b89-88f8-4c11-8d5a-0e29e3db8b9b": [
+    {
+      "role": "user",
+      "content": "Olá, como você está?"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta mock para: Olá, como você está?"
+    }
+  ],
+  "b24bcb3f-b442-4683-839b-bcc6b47bd137": [
+    {
+      "role": "user",
+      "content": "Qual é a capital do Brasil?"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta mock para: Qual é a capital do Brasil?"
+    },
+    {
+      "role": "user",
+      "content": "E qual é a população?"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta mock para: E qual é a população?"
+    }
+  ],
+  "20041f2b-5c37-4046-9f85-4229ad41899b": [
+    {
+      "role": "user",
+      "content": "O que é Python?"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta mock para: O que é Python?"
+    },
+    {
+      "role": "user",
+      "content": "É popular?"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta mock para: É popular?"
+    }
+  ],
+  "878ad5f0-e99d-45ed-b060-aa871e367c44": [
+    {
+      "role": "user",
+      "content": "Olá, como você está?"
+    },
+    {
+      "role": "assistant",
+      "content": "Olá! Estou operando normalmente. Como posso te ajudar hoje?"
+    }
+  ],
+  "14165b87-816b-4cff-a59c-2e7789b7a7ba": [
+    {
+      "role": "user",
+      "content": "Qual é a capital do Brasil?"
+    },
+    {
+      "role": "assistant",
+      "content": "Brasília é a capital do Brasil."
+    },
+    {
+      "role": "user",
+      "content": "E qual é a população?"
+    },
+    {
+      "role": "assistant",
+      "content": "A população de Brasília é aproximadamente 3 milhões."
+    }
+  ],
+  "83603515-4a05-494d-b8be-c5a6964cce23": [
+    {
+      "role": "user",
+      "content": "O que é Python?"
+    },
+    {
+      "role": "assistant",
+      "content": "Python é uma linguagem de programação."
+    },
+    {
+      "role": "user",
+      "content": "É popular?"
+    },
+    {
+      "role": "assistant",
+      "content": "Sim, Python é muito popular para IA e Data Science."
+    }
+  ],
+  "94dc55b7-b288-413b-b835-a7fad434ebeb": [
+    {
+      "role": "user",
+      "content": "Olá, como você está?"
+    },
+    {
+      "role": "assistant",
+      "content": "Resposta mock para: Olá, como você está?"
+    }
+  ],
+  "ccd6937c-a5c2-4198-a54b-ed32d85f2e3e": [
+    {
+      "role": "user",
+      "content": "Qual é a capital do Brasil?"
+    },
+    {
+      "role": "assistant",
+      "content": "Brasília é a capital do Brasil."
+    },
+    {
+      "role": "user",
+      "content": "E qual é a população?"
+    },
+    {
+      "role": "assistant",
+      "content": "A população de Brasília é aproximadamente 3 milhões."
+    }
+  ],
+  "6c673639-4318-4358-9740-719f3f265ec6": [
+    {
+      "role": "user",
+      "content": "O que é Python?"
+    },
+    {
+      "role": "assistant",
+      "content": "Python é uma linguagem de programação."
+    },
+    {
+      "role": "user",
+      "content": "É popular?"
+    },
+    {
+      "role": "assistant",
+      "content": "Sim, Python é muito popular para IA e Data Science."
+    }
+  ],
+  "3e14dc4c-26ae-4c04-8d9e-7eef2e51d345": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. O assistente virtual está funcionando. Pode começar o teste.\n"
+    }
+  ],
+  "09474e05-a3a6-4dd3-98c1-1ccd60a58235": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. O sistema parece estar funcionando. Pode prosseguir com o teste.\n"
+    }
+  ],
+  "cbba7da2-b5e1-4f78-a864-e6615f80ad07": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. Teste concluído. Estou operando. Pode prosseguir com a transcrição.\n"
+    }
+  ],
+  "7b8fdde1-6c2e-4414-b7fa-d3535d380813": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Transcrevendo. Funcionando. Ok.\n"
+    }
+  ],
+  "1684bced-25e3-4920-83a2-5694d04c9910": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. A transcrição está funcionando. Pode prosseguir com o teste.\n"
+    }
+  ],
+  "108a96b4-9051-4431-8055-bcf42a3bd78d": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. O sistema de transcrição está funcionando. Pode começar com o teste.\n"
+    },
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Transcrevendo: \"Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente.\" \n\nSem problemas. Pronto para o próximo passo.\n"
+    }
+  ],
+  "string": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Funcionando. Qual é a transcrição?\n"
+    }
+  ],
+  "test-ws-session-001": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Ok. Teste realizado. Funcionando. Pode prosseguir."
+    }
+  ],
+  "criterion-verification-session": [
+    {
+      "role": "user",
+      "content": "Olá, este é um teste de transcrição em português. O assistente virtual está funcionando corretamente."
+    },
+    {
+      "role": "assistant",
+      "content": "Entendido. Teste concluído. Estou operacional. Pode prosseguir com o teste.\n"
+    }
+  ]
+}

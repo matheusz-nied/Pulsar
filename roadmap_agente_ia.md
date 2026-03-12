@@ -272,7 +272,7 @@ Mock da API do Claude usando unittest.mock para não gastar tokens nos testes.
 
 ---
 
-# FASE 2 — Voz Completa + Primeiras Tools
+# Feita - FASE 2 — Voz Completa + Primeiras Tools
 **Meta:** Fala → texto → Claude → voz funcionando. 3-5 tools ativas.
 **Duração estimada:** 3 semanas
 
@@ -817,7 +817,7 @@ Atualize backend/agent/memory.py adicionando a classe VectorMemory:
 
 ---
 
-## TAREFA 3.2 — SQLite para dados estruturados
+## Feita - TAREFA 3.2 — SQLite para dados estruturados
 
 **Prompt para o agente:**
 ```

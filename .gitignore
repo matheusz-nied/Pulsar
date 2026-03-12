@@ -22,7 +22,10 @@ env/
 /backend/audio_cache/*.wav
 
 # Dados de memória (ChromaDB e SQLite)
-/backend/memory/
+/backend/memory/*.db
+/backend/memory/*.db-*
+/backend/memory/chroma/
+/backend/memory/chroma_data/
 
 # IDE
 .vscode/

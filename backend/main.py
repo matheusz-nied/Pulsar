@@ -40,6 +40,7 @@ from backend.agent.agent import agent  # noqa: E402
 from backend.agent.memory import persistent_memory, session_memory  # noqa: E402
 from backend.audio.stt import get_stt  # noqa: E402
 from backend.audio.tts import get_tts  # noqa: E402
+from backend.memory.database import db  # noqa: E402
 
 
 # --- Configuração do Loguru ---
@@ -121,6 +122,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Ambiente: {os.getenv('ENV', 'development')}")
     logger.info(f"Projeto raiz: {_PROJECT_ROOT}")
     
+    # Inicializar banco de dados SQLite
+    await db.inicializar()
+    
     # Inicializar APScheduler para alarmes
     from backend.tools.system import iniciar_scheduler
     iniciar_scheduler()
@@ -130,6 +134,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Parar APScheduler graciosamente
     from backend.tools.system import parar_scheduler
     parar_scheduler()
+    
+    # Fechar conexão com banco de dados
+    await db.fechar()
     
     logger.info("👋 Assistente Virtual Local encerrando...")
 
