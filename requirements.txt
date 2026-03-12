@@ -39,6 +39,9 @@ python-telegram-bot==22.6
 # Notícias
 feedparser==6.0.11
 
+# Sistema
+psutil==6.1.1
+
 # Logs
 loguru==0.7.3
 

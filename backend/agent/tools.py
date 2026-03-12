@@ -48,6 +48,7 @@ def register_tool(name: str, description: str) -> Callable:
 def _register_builtin_tools() -> None:
     """Registra as tools internas do agente."""
     from backend.tools.news import buscar_noticias
+    from backend.tools.system import abrir_app, ajustar_volume, confirmar_fechar, fechar_app
 
     register_tool(
         name="buscar_noticias",
@@ -56,6 +57,29 @@ def _register_builtin_tools() -> None:
             "software, brasil, geral. Aceita query opcional para filtrar resultados."
         ),
     )(buscar_noticias)
+
+    register_tool(
+        name="abrir_app",
+        description=(
+            "Abre um aplicativo da whitelist. "
+            "Apps disponíveis: chrome, firefox, vscode, terminal, calculadora."
+        ),
+    )(abrir_app)
+
+    register_tool(
+        name="fechar_app",
+        description="Busca processos por nome e solicita confirmação para fechar.",
+    )(fechar_app)
+
+    register_tool(
+        name="confirmar_fechar",
+        description="Fecha processos após confirmação via fechar_app.",
+    )(confirmar_fechar)
+
+    register_tool(
+        name="ajustar_volume",
+        description="Ajusta o volume do sistema (0-100). Funciona em Linux, Windows e macOS.",
+    )(ajustar_volume)
 
 
 _register_builtin_tools()
