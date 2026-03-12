@@ -66,39 +66,55 @@ class WhisperSTT:
             f"(device={self.device}, compute_type={self.compute_type})..."
         )
         
-        try:
-            self.model = WhisperModel(
-                model_size,
-                device=self.device,
-                compute_type=self.compute_type
-            )
-            logger.success(
-                f"Modelo Whisper '{model_size}' carregado com sucesso "
-                f"(device={self.device}, compute_type={self.compute_type})"
-            )
-        except ValueError as e:
-            # Fallback para CPU se CUDA falhar
-            if "float16" in str(e) and self.device == "cuda":
-                logger.warning(
-                    f"CUDA não suporta float16, usando CPU com int8: {e}"
-                )
-                self.device = "cpu"
-                self.compute_type = "int8"
+        # Tenta carregar com diferentes configurações em ordem de preferência
+        configs_to_try = [
+            (self.device, self.compute_type),  # Configuração detectada
+            ("cpu", "int8"),                    # Fallback 1: CPU com int8
+            ("cpu", "default"),                 # Fallback 2: CPU com default
+        ]
+        
+        last_error: Exception = RuntimeError("Falha ao carregar modelo Whisper")
+        for idx, (device, compute_type) in enumerate(configs_to_try):
+            try:
+                self.device = device
+                self.compute_type = compute_type
+                
                 self.model = WhisperModel(
                     model_size,
                     device=self.device,
                     compute_type=self.compute_type
                 )
-                logger.success(
-                    f"Modelo Whisper '{model_size}' carregado com sucesso "
-                    f"(fallback: device={self.device}, compute_type={self.compute_type})"
-                )
-            else:
-                logger.error(f"Erro ao carregar modelo Whisper: {e}")
+                
+                if idx == 0:
+                    logger.success(
+                        f"Modelo Whisper '{model_size}' carregado com sucesso "
+                        f"(device={self.device}, compute_type={self.compute_type})"
+                    )
+                else:
+                    logger.warning(
+                        f"Usando fallback {idx}: device={self.device}, "
+                        f"compute_type={self.compute_type}"
+                    )
+                    logger.success(
+                        f"Modelo Whisper '{model_size}' carregado com sucesso (fallback)"
+                    )
+                break  # Sucesso, sai do loop
+                
+            except ValueError as e:
+                last_error = e
+                if idx < len(configs_to_try) - 1:
+                    logger.debug(
+                        f"Falha com device={device}, compute_type={compute_type}: {e}"
+                    )
+                continue
+            except Exception as e:
+                last_error = e
+                logger.error(f"Erro inesperado ao carregar modelo Whisper: {e}")
                 raise
-        except Exception as e:
-            logger.error(f"Erro ao carregar modelo Whisper: {e}")
-            raise
+        else:
+            # Se chegou aqui, todas as tentativas falharam
+            logger.error(f"Falha ao carregar modelo após todas tentativas: {last_error}")
+            raise last_error
     
     async def transcrever(self, audio_path: str) -> str:
         """

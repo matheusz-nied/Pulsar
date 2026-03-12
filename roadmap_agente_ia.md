@@ -330,7 +330,7 @@ Crie o arquivo backend/audio/tts.py com as seguintes especificações:
 
 ---
 
-## TAREFA 2.3 — Rota POST /voice
+## Feita - TAREFA 2.3 — Rota POST /voice
 
 **Prompt para o agente:**
 ```

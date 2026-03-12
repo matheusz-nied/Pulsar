@@ -20,9 +20,9 @@ from typing import Any, AsyncGenerator
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -36,6 +36,8 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # Backend imports (precisam do .env carregado para inicializar o agente)
 from backend.agent.agent import agent  # noqa: E402
 from backend.agent.memory import persistent_memory, session_memory  # noqa: E402
+from backend.audio.stt import get_stt  # noqa: E402
+from backend.audio.tts import get_tts  # noqa: E402
 
 
 # --- Configuração do Loguru ---
@@ -93,6 +95,14 @@ class HealthResponse(BaseModel):
 class ErrorResponse(BaseModel):
     """Modelo de resposta de erro."""
     detail: str
+
+
+class VoiceResponse(BaseModel):
+    """Modelo de resposta do endpoint /voice."""
+    transcricao: str
+    resposta: str
+    audio_url: str
+    session_id: str
 
 
 # --- Lifecycle ---
@@ -256,6 +266,187 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
             status_code=500,
             detail="Erro ao processar sua mensagem. Tente novamente.",
         )
+
+
+@app.post(
+    "/voice",
+    response_model=VoiceResponse,
+    summary="Processar mensagem de voz",
+    description="Recebe áudio, transcreve, processa com o agente e retorna resposta em áudio.",
+    responses={
+        400: {"model": ErrorResponse, "description": "Arquivo de áudio inválido"},
+        500: {"model": ErrorResponse, "description": "Erro interno do servidor"},
+    },
+)
+async def processar_voz(
+    audio: UploadFile = File(..., description="Arquivo de áudio (WAV, MP3, etc.)"),
+    session_id: str | None = Form(None, description="ID da sessão para manter contexto"),
+) -> VoiceResponse:
+    """
+    Endpoint de processamento de voz.
+
+    Fluxo completo:
+    1. Recebe arquivo de áudio via multipart/form-data
+    2. Salva temporariamente e transcreve com STT
+    3. Processa texto com o agente
+    4. Sintetiza resposta com TTS
+    5. Retorna transcrição, resposta textual e URL do áudio
+
+    Args:
+        audio: Arquivo de áudio enviado pelo cliente.
+        session_id: ID da sessão (opcional, será gerado se não fornecido).
+
+    Returns:
+        Transcrição, resposta do agente, URL do áudio e session_id.
+
+    Raises:
+        HTTPException: 400 se o arquivo for inválido, 500 em erros de processamento.
+    """
+    temp_audio_path: Path | None = None
+
+    try:
+        # Gera session_id se não fornecido
+        session_id = session_id or str(uuid.uuid4())
+
+        # 1. Salvar arquivo temporário
+        temp_filename = f"input_{uuid.uuid4()}.wav"
+        temp_audio_path = Path("/tmp") / temp_filename
+
+        logger.info(
+            f"Recebendo áudio: {audio.filename} "
+            f"(content_type={audio.content_type}, session={session_id})"
+        )
+
+        # Salva o arquivo enviado
+        content = await audio.read()
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail="Arquivo de áudio vazio.",
+            )
+
+        temp_audio_path.write_bytes(content)
+        logger.debug(f"Áudio salvo temporariamente em: {temp_audio_path}")
+
+        # 2. Transcrever áudio (STT)
+        stt = get_stt(model_size="base")  # Usa modelo base para melhor performance
+        transcricao = await stt.transcrever(str(temp_audio_path))
+
+        if not transcricao.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Não foi possível transcrever o áudio. "
+                       "Verifique se o áudio contém fala clara.",
+            )
+
+        logger.info(f"Transcrição (sessão {session_id}): {transcricao}")
+
+        # 3. Processar com o agente
+        historico = session_memory.get_history(session_id)
+        resposta = await agent.processar(transcricao, historico)  # type: ignore[arg-type]
+
+        # 4. Atualizar histórico da sessão
+        session_memory.add_message(session_id, "user", transcricao)
+        session_memory.add_message(session_id, "assistant", resposta)
+        persistent_memory.save(session_id, session_memory.get_history(session_id))
+
+        logger.info(f"Resposta gerada (sessão {session_id}): {resposta}")
+
+        # 5. Sintetizar resposta (TTS)
+        tts = get_tts()
+        audio_path = await tts.sintetizar(resposta)
+        audio_filename = Path(audio_path).name
+
+        # 6. Gerar URL do áudio
+        audio_url = f"/audio/{audio_filename}"
+
+        logger.success(
+            f"Processamento de voz concluído (sessão {session_id}): "
+            f"transcricao={len(transcricao)} chars, "
+            f"resposta={len(resposta)} chars, "
+            f"audio={audio_filename}"
+        )
+
+        return VoiceResponse(
+            transcricao=transcricao,
+            resposta=resposta,
+            audio_url=audio_url,
+            session_id=session_id,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar áudio na sessão {session_id}: {e}")
+        logger.exception(e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar áudio: {str(e)}",
+        )
+    finally:
+        # Limpar arquivo temporário
+        if temp_audio_path and temp_audio_path.exists():
+            try:
+                temp_audio_path.unlink()
+                logger.debug(f"Arquivo temporário removido: {temp_audio_path}")
+            except Exception as e:
+                logger.warning(f"Erro ao remover arquivo temporário: {e}")
+
+
+@app.get(
+    "/audio/{filename}",
+    summary="Servir arquivo de áudio",
+    description="Retorna um arquivo MP3 do cache de áudio gerado pelo TTS.",
+    responses={
+        404: {"model": ErrorResponse, "description": "Arquivo não encontrado"},
+    },
+)
+async def servir_audio(filename: str) -> FileResponse:
+    """
+    Serve arquivos de áudio MP3 do cache do TTS.
+
+    Args:
+        filename: Nome do arquivo MP3 (hash MD5 + .mp3).
+
+    Returns:
+        Arquivo MP3 para download/streaming.
+
+    Raises:
+        HTTPException: 404 se o arquivo não existir.
+    """
+    # Validar que o filename não contém caracteres perigosos
+    if ".." in filename or "/" in filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Nome de arquivo inválido.",
+        )
+
+    # Validar extensão
+    if not filename.endswith(".mp3"):
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas arquivos .mp3 são suportados.",
+        )
+
+    # Montar caminho do arquivo
+    tts = get_tts()
+    audio_path = tts.cache_path / filename
+
+    # Verificar se existe
+    if not audio_path.exists():
+        logger.warning(f"Arquivo de áudio não encontrado: {filename}")
+        raise HTTPException(
+            status_code=404,
+            detail="Arquivo de áudio não encontrado.",
+        )
+
+    logger.debug(f"Servindo áudio: {filename} ({audio_path.stat().st_size} bytes)")
+
+    return FileResponse(
+        path=str(audio_path),
+        media_type="audio/mpeg",
+        filename=filename,
+    )
 
 
 # --- Entrypoint ---
