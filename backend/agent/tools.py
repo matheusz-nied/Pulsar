@@ -49,6 +49,7 @@ def _register_builtin_tools() -> None:
     """Registra as tools internas do agente."""
     from backend.tools.news import buscar_noticias
     from backend.tools.system import abrir_app, ajustar_volume, confirmar_fechar, fechar_app
+    from backend.tools.web import buscar_web, resumir_pagina
 
     register_tool(
         name="buscar_noticias",
@@ -57,6 +58,22 @@ def _register_builtin_tools() -> None:
             "software, brasil, geral. Aceita query opcional para filtrar resultados."
         ),
     )(buscar_noticias)
+
+    register_tool(
+        name="buscar_web",
+        description=(
+            "Busca informações na web usando Brave Search ou DuckDuckGo. "
+            "Retorna título, URL e descrição dos resultados."
+        ),
+    )(buscar_web)
+
+    register_tool(
+        name="resumir_pagina",
+        description=(
+            "Acessa uma URL e retorna um resumo do conteúdo. "
+            "Apenas domínios na whitelist são permitidos (wikipedia, g1, bbc, reuters, etc)."
+        ),
+    )(resumir_pagina)
 
     register_tool(
         name="abrir_app",
