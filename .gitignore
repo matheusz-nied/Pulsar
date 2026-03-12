@@ -1,0 +1,37 @@
+# === Assistente Virtual Local — .gitignore ===
+
+# Variáveis de ambiente (NUNCA commitar)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Cache de áudio gerado pelo TTS
+/backend/audio_cache/*.mp3
+/backend/audio_cache/*.wav
+
+# Dados de memória (ChromaDB e SQLite)
+/backend/memory/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
