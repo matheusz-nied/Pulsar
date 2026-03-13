@@ -374,20 +374,13 @@ async def _executar_alarme(mensagem: str, job_id: str) -> None:
 
         # Telegram: enviar notificação se configurado
         try:
-            telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
-            telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+            from telegram_bot.bot import send_notification
 
-            if telegram_token and telegram_chat_id:
-                import httpx
-
-                url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-                payload = {
-                    "chat_id": telegram_chat_id,
-                    "text": f"🔔 Alarme:\n{mensagem}",
-                }
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(url, json=payload)
+            enviado = await send_notification(f"🔔 Alarme:\n{mensagem}")
+            if enviado:
                 logger.info("Notificação do alarme enviada via Telegram")
+            else:
+                logger.warning("Notificação do alarme não enviada: verifique TELEGRAM_OWNER_ID")
         except Exception as e:
             logger.warning(f"Erro ao enviar notificação do alarme via Telegram: {e}")
 

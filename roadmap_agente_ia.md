@@ -1013,7 +1013,7 @@ Crie o arquivo backend/security/sandbox.py:
 
 ---
 
-## Difícil (Sonnet 4.6 Thinking) - TAREFA 4.1 — Telegram Bot
+## Feita - Difícil (Sonnet 4.6 Thinking) - TAREFA 4.1 — Telegram Bot
 
 **Prompt para o agente:**
 ```

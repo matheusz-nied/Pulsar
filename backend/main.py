@@ -84,6 +84,17 @@ class VoiceResponse(BaseModel):
     modelo_usado: str = "claude"  # "claude" | "ollama" | "erro"
 
 
+class NotifyRequest(BaseModel):
+    """Modelo de requisição para o endpoint /notify."""
+    mensagem: str
+
+
+class NotifyResponse(BaseModel):
+    """Modelo de resposta para o endpoint /notify."""
+    enviado: bool
+    detalhe: str
+
+
 # --- Lifecycle ---
 
 @asynccontextmanager
@@ -462,6 +473,70 @@ async def servir_audio(filename: str) -> FileResponse:
         media_type="audio/mpeg",
         filename=filename,
     )
+
+
+@app.get(
+    "/agendamentos",
+    summary="Listar agendamentos ativos",
+    description="Retorna alarmes agendados em formato estruturado para integrações externas.",
+)
+async def listar_agendamentos() -> dict[str, Any]:
+    """Lista os alarmes ativos no scheduler em formato JSON estruturado."""
+    try:
+        from backend.tools.system import scheduler
+
+        if scheduler is None:
+            return {"alarmes": [], "total": 0}
+
+        alarmes: list[dict[str, str]] = []
+        for job in scheduler.get_jobs():
+            horario = ""
+            if job.next_run_time is not None:
+                horario = job.next_run_time.isoformat()
+
+            mensagem = ""
+            if job.args and len(job.args) > 0 and isinstance(job.args[0], str):
+                mensagem = job.args[0]
+
+            alarmes.append(
+                {
+                    "id": job.id,
+                    "horario": horario,
+                    "mensagem": mensagem,
+                }
+            )
+
+        return {"alarmes": alarmes, "total": len(alarmes)}
+    except Exception as exc:
+        logger.error("Erro ao listar agendamentos: {}", exc)
+        raise HTTPException(status_code=500, detail="Erro ao listar agendamentos.")
+
+
+@app.post(
+    "/notify",
+    response_model=NotifyResponse,
+    summary="Enviar notificação via Telegram",
+    description="Recebe uma mensagem e envia para o chat do dono no Telegram.",
+)
+async def notify_telegram(payload: NotifyRequest) -> NotifyResponse:
+    """Encaminha uma mensagem de notificação para o dono via bot do Telegram."""
+    if not payload.mensagem.strip():
+        raise HTTPException(status_code=400, detail="A mensagem não pode ser vazia.")
+
+    try:
+        from telegram_bot.bot import send_notification
+
+        enviado = await send_notification(payload.mensagem.strip())
+        if enviado:
+            return NotifyResponse(enviado=True, detalhe="Notificação enviada com sucesso.")
+
+        return NotifyResponse(
+            enviado=False,
+            detalhe="Não foi possível enviar notificação. Verifique TELEGRAM_OWNER_ID e TELEGRAM_BOT_TOKEN.",
+        )
+    except Exception as exc:
+        logger.error("Erro no endpoint /notify: {}", exc)
+        raise HTTPException(status_code=500, detail="Erro ao enviar notificação.")
 
 
 @app.get(
