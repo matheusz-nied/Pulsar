@@ -17,6 +17,7 @@ openai==2.26.0  # Para OpenAIProvider e DeepSeekProvider
 faster-whisper==1.2.1
 edge-tts==7.2.7
 sounddevice==0.5.5
+soundfile==0.13.1
 pvporcupine==4.0.2
 
 # Memória
