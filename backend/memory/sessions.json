@@ -388,5 +388,121 @@
       "role": "assistant",
       "content": "Tocando \"Back In Black\" do AC/DC! 🎵"
     }
+  ],
+  "8016b8a0-0916-45ec-a367-4d9720419006": [
+    {
+      "role": "user",
+      "content": "Tó aqui, tó aqui a si de si."
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    }
+  ],
+  "2cb48b1a-1d0d-4e6a-9218-c5928f5d85b7": [
+    {
+      "role": "user",
+      "content": "tocar esse de c"
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    },
+    {
+      "role": "user",
+      "content": "tocar esse de si."
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    },
+    {
+      "role": "user",
+      "content": "que dia é hoje"
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    },
+    {
+      "role": "user",
+      "content": "que já hoje."
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    },
+    {
+      "role": "user",
+      "content": "que dia é hoje."
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    }
+  ],
+  "57938489-a777-41d9-ab77-3e43283c2828": [
+    {
+      "role": "user",
+      "content": "que deia hoje"
+    },
+    {
+      "role": "assistant",
+      "content": "Hoje é 19 de dezembro de 2024, quinta-feira."
+    },
+    {
+      "role": "user",
+      "content": "me mando uma mensagem no telegram."
+    },
+    {
+      "role": "assistant",
+      "content": "Não tenho acesso ao Telegram para enviar mensagens."
+    },
+    {
+      "role": "user",
+      "content": "Qual é o maior animal que existe no planeta?"
+    },
+    {
+      "role": "assistant",
+      "content": "A baleia-azul é o maior animal do planeta, podendo chegar a 30 metros de comprimento."
+    }
+  ],
+  "f0bbd0ae-af68-4be8-91e6-f21ef59cbc1d": [
+    {
+      "role": "user",
+      "content": "Tocar Berserker a mão de suado."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Berserker\" da banda Mão de Suado."
+    },
+    {
+      "role": "user",
+      "content": "Tocar back in black e cdc."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Back In Black\" do AC/DC."
+    }
+  ],
+  "f756b36d-4154-4354-9287-187a1e7484bb": [
+    {
+      "role": "user",
+      "content": "tocar a cdc back in black"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Back In Black\" do AC/DC."
+    }
+  ],
+  "ddad5fb6-6c60-49e4-8e4c-94cb59aaa78a": [
+    {
+      "role": "user",
+      "content": "tocar back em black sdc"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Back In Black\" do AC/DC! 🎵"
+    }
   ]
 }

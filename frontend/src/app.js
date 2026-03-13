@@ -6,16 +6,26 @@
  * com o motor de animação do robô.
  */
 
-const API_URL = 'http://localhost:8000';
-const WS_URL  = 'ws://localhost:8000/ws/audio';
+const API_URL      = 'http://localhost:8000';
+const WS_URL_AUDIO = 'ws://localhost:8000/ws/audio';
+const WS_URL_VOICE = 'ws://localhost:8000/ws/voice';
 
 class PulsarApp {
   constructor() {
     this.currentView = 'chat';
     this.sessionId = this._loadSessionId();
     this.messages = [];
+
+    // WebSocket para streaming de áudio manual (botão mic)
     this.ws = null;
     this.wsReconnectDelay = 1000;
+
+    // WebSocket para eventos de voz do backend (wake word / pipeline)
+    this.wsVoice = null;
+    this.wsVoiceReconnectDelay = 1000;
+
+    // Streaming de chunks do agente via wsVoice
+    this._voiceStreamingDiv = null;
 
     this.mediaRecorder = null;
     this.audioChunks = [];
@@ -39,6 +49,7 @@ class PulsarApp {
 
     this._bindEvents();
     this._connectWebSocket();
+    this._connectVoiceWebSocket();
     this._loadHistory();
     this._resetIdleTimer();
     this._setupTitlebar();
@@ -125,13 +136,13 @@ class PulsarApp {
     this.robotView.classList.toggle('active', view === 'robot');
   }
 
-  /* ---- WebSocket ---- */
+  /* ---- WebSocket (áudio manual via botão mic) ---- */
 
   _connectWebSocket() {
     this._setStatus('connecting');
 
     try {
-      this.ws = new WebSocket(WS_URL);
+      this.ws = new WebSocket(WS_URL_AUDIO);
     } catch {
       this._setStatus('offline');
       this._scheduleReconnect();
@@ -139,15 +150,18 @@ class PulsarApp {
     }
 
     this.ws.onopen = () => {
-      this._setStatus('online');
       this.wsReconnectDelay = 1000;
+      // Status fica "online" quando o ws/voice também conectar
+      if (this.wsVoice && this.wsVoice.readyState === WebSocket.OPEN) {
+        this._setStatus('online');
+      }
     };
 
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        this._handleWSMessage(data);
-      } catch { /* non-JSON message */ }
+        this._handleWSAudioMessage(data);
+      } catch { /* non-JSON */ }
     };
 
     this.ws.onclose = () => {
@@ -167,38 +181,151 @@ class PulsarApp {
     }, this.wsReconnectDelay);
   }
 
-  _handleWSMessage(data) {
+  // Eventos do WebSocket de áudio manual (botão mic → /ws/audio)
+  _handleWSAudioMessage(data) {
     switch (data.type) {
       case 'transcricao':
         this.robot.onUserSpeaking();
-        if (data.texto) {
-          this._addMessage('user', data.texto);
-        }
+        if (data.texto) this._addMessage('user', data.texto);
         break;
-
       case 'resposta_chunk':
         this.robot.onProcessing();
-        if (data.texto) {
-          this._appendAssistantChunk(data.texto);
-        }
+        if (data.texto) this._appendAssistantChunk(data.texto);
         break;
-
       case 'audio_ready':
-        if (data.url) {
-          this._playAudio(data.url);
-        }
+        if (data.url) this._playAudio(data.url);
         break;
-
       case 'erro':
         this.robot.onError();
         this.isProcessing = false;
         this._removeTypingIndicator();
         this._addMessage('assistant', `Erro: ${data.mensagem || 'Erro desconhecido'}`);
         break;
+    }
+  }
+
+  /* ---- WebSocket de voz (wake word + pipeline backend → /ws/voice) ---- */
+
+  _connectVoiceWebSocket() {
+    try {
+      this.wsVoice = new WebSocket(WS_URL_VOICE);
+    } catch {
+      this._scheduleVoiceReconnect();
+      return;
+    }
+
+    this.wsVoice.onopen = () => {
+      this.wsVoiceReconnectDelay = 1000;
+      this._setStatus('online');
+      // Keep-alive: envia ping a cada 25s
+      this._voicePingInterval = setInterval(() => {
+        if (this.wsVoice && this.wsVoice.readyState === WebSocket.OPEN) {
+          this.wsVoice.send('ping');
+        }
+      }, 25000);
+    };
+
+    this.wsVoice.onmessage = (event) => {
+      if (event.data === 'pong') return;
+      try {
+        const data = JSON.parse(event.data);
+        this._handleVoiceEvent(data);
+      } catch { /* non-JSON */ }
+    };
+
+    this.wsVoice.onclose = () => {
+      clearInterval(this._voicePingInterval);
+      this._setStatus('offline');
+      this._scheduleVoiceReconnect();
+    };
+
+    this.wsVoice.onerror = () => {
+      this._setStatus('offline');
+    };
+  }
+
+  _scheduleVoiceReconnect() {
+    setTimeout(() => {
+      this.wsVoiceReconnectDelay = Math.min(this.wsVoiceReconnectDelay * 1.5, 10000);
+      this._connectVoiceWebSocket();
+    }, this.wsVoiceReconnectDelay);
+  }
+
+  // Eventos do pipeline de voz backend (Porcupine → STT → Agente → TTS)
+  _handleVoiceEvent(data) {
+    switch (data.type) {
+      case 'ping':
+        // keep-alive do servidor, ignorar
+        break;
 
       case 'wake_word':
+        // Acorda o robô e muda para view robô
         this.robot.onWakeWord();
+        this.switchView('robot');
+        this._resetIdleTimer();
         break;
+
+      case 'transcricao':
+        // Mostra o que o usuário disse
+        this.robot.onUserSpeaking();
+        if (data.texto) {
+          this._addMessage('user', data.texto);
+          // Muda para chat para o usuário ver a conversa
+          this.switchView('chat');
+        }
+        this.robot.onProcessing();
+        // Prepara div de streaming para a resposta
+        this._voiceStreamingDiv = null;
+        break;
+
+      case 'resposta_chunk':
+        // Acumula resposta do agente em streaming
+        if (data.texto) this._appendVoiceChunk(data.texto);
+        break;
+
+      case 'audio_ready':
+        // Finaliza streaming e reproduz áudio
+        this._finalizeVoiceStream();
+        if (data.url) this._playAudio(data.url);
+        break;
+
+      case 'voice_idle':
+        // Nenhum áudio detectado após wake word
+        this.robot.onIdle();
+        break;
+
+      case 'erro':
+        this.robot.onError();
+        this._finalizeVoiceStream();
+        this._addMessage('assistant', `Erro: ${data.mensagem || 'Erro desconhecido'}`);
+        break;
+    }
+  }
+
+  // Acumula chunks de resposta vindos do pipeline de voz (streaming)
+  _appendVoiceChunk(text) {
+    if (!this._voiceStreamingDiv) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      this._voiceStreamingDiv = document.createElement('div');
+      this._voiceStreamingDiv.className = 'message assistant streaming';
+      this._voiceStreamingDiv.innerHTML =
+        `<span class="msg-text"></span><span class="msg-time">${timeStr}</span>`;
+      this.chatMessages.appendChild(this._voiceStreamingDiv);
+    }
+    const span = this._voiceStreamingDiv.querySelector('.msg-text');
+    span.textContent += text;
+    this._scrollToBottom();
+  }
+
+  _finalizeVoiceStream() {
+    if (this._voiceStreamingDiv) {
+      this._voiceStreamingDiv.classList.remove('streaming');
+      const text = this._voiceStreamingDiv.querySelector('.msg-text').textContent;
+      const timeStr = this._voiceStreamingDiv.querySelector('.msg-time').textContent;
+      this.messages.push({ role: 'assistant', text, time: timeStr, timestamp: new Date().toISOString() });
+      this._saveHistory();
+      this._voiceStreamingDiv = null;
     }
   }
 

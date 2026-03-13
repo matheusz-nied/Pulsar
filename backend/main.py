@@ -11,6 +11,7 @@ Responsável por:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -108,23 +109,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🚀 Assistente Virtual Local iniciando...")
     logger.info(f"Ambiente: {os.getenv('ENV', 'development')}")
     logger.info(f"Projeto raiz: {_PROJECT_ROOT}")
-    
+
     # Inicializar banco de dados SQLite
     await db.inicializar()
-    
+
     # Inicializar APScheduler para alarmes
     from backend.tools.system import iniciar_scheduler
     iniciar_scheduler()
-    
+
+    # Inicializar Wake Word Listener (Porcupine) se habilitado
+    wake_listener = None
+    if os.getenv("PORCUPINE_ACCESS_KEY", ""):
+        try:
+            from backend.audio.wake_word import get_wake_word_listener
+            wake_listener = get_wake_word_listener()
+            wake_listener.start(asyncio.get_event_loop())
+        except Exception as e:
+            logger.warning(f"Wake word desativado: {e}")
+
     yield
-    
+
+    # Parar Wake Word Listener
+    if wake_listener is not None:
+        wake_listener.stop()
+
     # Parar APScheduler graciosamente
     from backend.tools.system import parar_scheduler
     parar_scheduler()
-    
+
     # Fechar conexão com banco de dados
     await db.fechar()
-    
+
     logger.info("👋 Assistente Virtual Local encerrando...")
 
 
@@ -694,6 +709,58 @@ async def websocket_audio(ws: WebSocket) -> None:
         logger.error(f"WebSocket /ws/audio erro: {e}")
         try:
             await ws.send_json({"type": "erro", "mensagem": str(e)})
+        except Exception:
+            pass
+
+
+# --- WebSocket: eventos de voz (wake word, STT, resposta, TTS) ---
+
+@app.websocket("/ws/voice")
+async def websocket_voice(ws: WebSocket) -> None:
+    """
+    WebSocket para o frontend receber eventos do pipeline de voz.
+
+    O cliente se conecta e apenas escuta — o servidor empurra eventos:
+      {"type": "wake_word"}                  → wake word detectada
+      {"type": "transcricao", "texto": ...}  → STT concluído
+      {"type": "resposta_chunk", "texto": ...} → chunk de resposta do agente
+      {"type": "audio_ready", "url": ...}    → TTS pronto para reproduzir
+      {"type": "voice_idle"}                 → pipeline encerrou sem áudio válido
+      {"type": "erro", "mensagem": ...}      → erro no pipeline
+    """
+    await ws.accept()
+    logger.info("WebSocket /ws/voice: cliente conectado")
+
+    # Registra callback que envia eventos para este cliente
+    async def _send(event: dict) -> None:
+        await ws.send_json(event)
+
+    try:
+        from backend.audio.wake_word import register_voice_listener, unregister_voice_listener
+        register_voice_listener(_send)
+
+        # Mantém conexão viva até o cliente desconectar
+        while True:
+            try:
+                # Aguarda mensagem (keep-alive ou configuração futura)
+                msg = await asyncio.wait_for(ws.receive_text(), timeout=30.0)
+                # Aceitar ping do cliente para manter conexão
+                if msg == "ping":
+                    await ws.send_text("pong")
+            except asyncio.TimeoutError:
+                # Envia keep-alive para evitar timeout do proxy/OS
+                try:
+                    await ws.send_json({"type": "ping"})
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        logger.info("WebSocket /ws/voice: cliente desconectado")
+    except Exception as e:
+        logger.error(f"WebSocket /ws/voice erro: {e}")
+    finally:
+        try:
+            from backend.audio.wake_word import unregister_voice_listener
+            unregister_voice_listener(_send)
         except Exception:
             pass
 
