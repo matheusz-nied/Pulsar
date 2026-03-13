@@ -13,7 +13,7 @@ import os
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from anthropic import APIConnectionError, APIStatusError, AsyncAnthropic, RateLimitError
 from anthropic.types import MessageParam, TextBlock
@@ -572,7 +572,7 @@ class ConversationAgent:
             if not self._use_langgraph:
                 resposta = await self.provider.gerar_resposta(  # type: ignore[arg-type]
                     mensagem_com_contexto,
-                    historico,
+                     [cast(MessageParam, {"role": msg["role"], "content": msg["content"]}) for msg in historico],
                 )
                 logger.debug(f"Resposta gerada (legacy): {resposta[:50]}...")
                 if vector_memory is not None:
@@ -699,7 +699,7 @@ class ConversationAgent:
             if not self._use_langgraph:
                 async for chunk in self.provider.gerar_resposta_stream(  # type: ignore[arg-type]
                     mensagem_com_contexto,
-                    historico,
+                    [cast(MessageParam, {"role": msg["role"], "content": msg["content"]}) for msg in historico],
                 ):
                     yield chunk
                 return
@@ -1025,8 +1025,9 @@ class OllamaAgent:
         """
         # Converte histórico para formato MessageParam
         historico_param: list[MessageParam] = [
-            {"role": msg["role"], "content": msg["content"]} for msg in historico
-        ]
+    cast(MessageParam, {"role": msg["role"], "content": msg["content"]})
+    for msg in historico
+]
         return await self.provider.gerar_resposta(mensagem, historico_param)
 
 
