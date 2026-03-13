@@ -15,6 +15,8 @@ from urllib.parse import quote_plus
 
 from loguru import logger
 
+from backend.core.logging_config import log_tool_call
+
 _JS_EXTRAIR_WATCH_LINK = """() => {
     const items = document.querySelectorAll('ytmusic-responsive-list-item-renderer');
     for (const item of items) {
@@ -269,6 +271,7 @@ class YoutubeMusicController:
 youtube_controller = YoutubeMusicController()
 
 
+@log_tool_call
 async def controlar_musica(acao: str, query: str = "") -> str:
     """Controla reprodução de música via YouTube Music.
 

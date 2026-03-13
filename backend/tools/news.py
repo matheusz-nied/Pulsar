@@ -13,11 +13,13 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import feedparser
 import httpx
 from loguru import logger
+
+from backend.core.logging_config import log_api_call
 
 
 # ============================================================================
@@ -67,6 +69,7 @@ class NewsApiProvider(NewsProvider):
         self.api_key = api_key
         self.base_url = "https://newsapi.org/v2/everything"
 
+    @log_api_call
     async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
         """Busca notícias via NewsAPI."""
         try:
@@ -142,6 +145,7 @@ class RSSProvider(NewsProvider):
         "tech_br": "https://olhardigital.com.br/feed",
     }
 
+    @log_api_call
     async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
         """Busca notícias via RSS feeds brasileiros."""
         try:
@@ -161,18 +165,30 @@ class RSSProvider(NewsProvider):
                 content = response.text
 
             feed = feedparser.parse(content)
+            feed_meta = cast(dict[str, Any], feed.feed)
 
             resultados: list[dict[str, Any]] = []
             for entry in feed.entries[:max_resultados]:
-                published = entry.get("published", entry.get("updated", ""))
+                entry_data = cast(dict[str, Any], entry)
+                published_raw = entry_data.get("published", entry_data.get("updated", ""))
+                published = str(published_raw) if published_raw is not None else ""
                 # Tentar formatar a data se possível
-                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                published_parsed = entry_data.get("published_parsed")
+                if isinstance(published_parsed, tuple) and len(published_parsed) >= 6:
                     try:
-                        published = datetime(*entry.published_parsed[:6]).strftime("%Y-%m-%d %H:%M")
+                        published = datetime(
+                            int(published_parsed[0]),
+                            int(published_parsed[1]),
+                            int(published_parsed[2]),
+                            int(published_parsed[3]),
+                            int(published_parsed[4]),
+                            int(published_parsed[5]),
+                        ).strftime("%Y-%m-%d %H:%M")
                     except Exception:
                         pass
 
-                description = entry.get("summary", entry.get("description", ""))
+                description_raw = entry_data.get("summary", entry_data.get("description", ""))
+                description = str(description_raw) if description_raw is not None else ""
                 # Limpar HTML básico do description
                 if "<" in description:
                     from html import unescape
@@ -180,11 +196,14 @@ class RSSProvider(NewsProvider):
                     description = re.sub(r"<[^>]+>", "", unescape(description))
                 description = description[:300]
 
+                source_raw = feed_meta.get("title", "RSS")
+                source = str(source_raw) if source_raw is not None else "RSS"
+
                 resultados.append({
-                    "title": entry.get("title", ""),
+                    "title": str(entry_data.get("title", "")),
                     "description": description,
-                    "url": entry.get("link", ""),
-                    "source": feed.feed.get("title", "RSS"),
+                    "url": str(entry_data.get("link", "")),
+                    "source": source,
                     "published_at": published,
                 })
 
@@ -221,6 +240,7 @@ class AlphaVantageProvider(NewsProvider):
         self.api_key = api_key
         self.base_url = "https://www.alphavantage.co/query"
 
+    @log_api_call
     async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
         """Busca notícias financeiras com sentiment via Alpha Vantage."""
         try:

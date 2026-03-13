@@ -26,6 +26,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from loguru import logger
 from pydantic import SecretStr
 
+from backend.core.logging_config import log_api_call
+
 
 # ============================================================================
 # RESPONSE TYPES
@@ -80,6 +82,7 @@ class ClaudeProvider:
             "Quando não souber algo, diz claramente."
         )
 
+    @log_api_call
     async def gerar_resposta(
         self, mensagem: str, historico: list[MessageParam]
     ) -> str:
@@ -118,6 +121,7 @@ class ClaudeProvider:
                 f"Não foi possível processar sua mensagem. Erro: {str(e)}"
             ) from e
 
+    @log_api_call
     async def gerar_resposta_stream(
         self, mensagem: str, historico: list[MessageParam]
     ) -> AsyncIterator[str]:

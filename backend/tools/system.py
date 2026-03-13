@@ -19,6 +19,8 @@ from typing import Any
 import psutil
 from loguru import logger
 
+from backend.core.logging_config import log_tool_call
+
 
 # ============================================================================
 # WHITELIST DE APLICATIVOS
@@ -86,6 +88,7 @@ async def get_system_info() -> dict[str, str]:
 # GERENCIAMENTO DE APLICATIVOS
 # ============================================================================
 
+@log_tool_call
 async def abrir_app(nome: str) -> str:
     """
     Abre um aplicativo da whitelist.
@@ -392,6 +395,7 @@ async def _executar_alarme(mensagem: str, job_id: str) -> None:
         logger.error(f"Erro ao executar alarme {job_id}: {e}")
 
 
+@log_tool_call
 async def definir_alarme(horario: str, mensagem: str) -> str:
     """
     Define um alarme para um horário específico.

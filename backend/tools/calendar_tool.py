@@ -16,6 +16,8 @@ from typing import Any
 
 from loguru import logger
 
+from backend.core.logging_config import log_tool_call
+
 
 async def get_upcoming_events(max_results: int = 10) -> list[dict[str, Any]]:
     """
@@ -66,3 +68,25 @@ async def create_event(
     except Exception as e:
         logger.error(f"Erro ao criar evento: {e}")
         raise
+
+
+@log_tool_call
+async def listar_eventos(max_resultados: int = 10) -> list[dict[str, Any]]:
+    """Lista próximos eventos do calendário (alias em português da tool)."""
+    return await get_upcoming_events(max_resultados)
+
+
+@log_tool_call
+async def criar_evento(
+    titulo: str,
+    inicio: datetime,
+    fim: datetime,
+    descricao: str = "",
+) -> dict[str, Any]:
+    """Cria um evento no calendário (alias em português da tool)."""
+    return await create_event(
+        title=titulo,
+        start_time=inicio,
+        end_time=fim,
+        description=descricao,
+    )

@@ -19,6 +19,8 @@ import httpx
 from bs4 import BeautifulSoup
 from loguru import logger
 
+from backend.core.logging_config import log_api_call, log_tool_call
+
 
 # ============================================================================
 # WHITELIST DE DOMÍNIOS SEGUROS
@@ -74,6 +76,7 @@ class BraveSearchProvider(SearchProvider):
         self.api_key = api_key
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
 
+    @log_api_call
     async def buscar(self, query: str, max_resultados: int) -> list[dict[str, str]]:
         """Realiza busca usando Brave Search API."""
         try:
@@ -122,6 +125,7 @@ class DuckDuckGoProvider(SearchProvider):
         """Inicializa o provider do DuckDuckGo."""
         self.base_url = "https://api.duckduckgo.com/"
 
+    @log_api_call
     async def buscar(self, query: str, max_resultados: int) -> list[dict[str, str]]:
         """Realiza busca usando DuckDuckGo API."""
         try:
@@ -286,6 +290,7 @@ async def resumir_pagina(url: str) -> str:
 search_service = SearchService()
 
 
+@log_tool_call
 async def buscar_web(query: str, max_resultados: int = 3) -> str:
     """
     Função de conveniência para buscar na web.

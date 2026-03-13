@@ -771,7 +771,7 @@ Adicionar ao requirements.txt: pyaudio
 
 ---
 
-# FASE 3 — Memória Persistente + Tools Avançadas
+# Feita - FASE 3 — Memória Persistente + Tools Avançadas
 **Meta:** ChromaDB ativo, Google Calendar, música e controle do sistema com segurança.
 **Duração estimada:** 4 semanas
 
@@ -1045,7 +1045,7 @@ Crie o arquivo telegram_bot/bot.py:
 
 ---
 
-## Difícil (Sonnet 4.6 Thinking) - TAREFA 4.2 — Fallback Ollama (modo offline)
+## Feita - Difícil (Sonnet 4.6 Thinking) - TAREFA 4.2 — Fallback Ollama (modo offline)
 
 **Prompt para o agente:**
 ```
@@ -1078,7 +1078,7 @@ Atualize backend/agent/agent.py para suportar fallback offline com Ollama:
 
 ---
 
-## Moderado (Codex) - TAREFA 4.3 — Sistema de logs estruturado
+## Feita - Moderado (Codex) - TAREFA 4.3 — Sistema de logs estruturado
 
 **Prompt para o agente:**
 ```

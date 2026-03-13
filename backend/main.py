@@ -14,7 +14,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import sys
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,7 +21,7 @@ from typing import Any, AsyncGenerator
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
@@ -40,38 +39,13 @@ from backend.agent.agent import agent  # noqa: E402
 from backend.agent.memory import persistent_memory, session_memory, vector_memory  # noqa: E402
 from backend.audio.stt import get_stt  # noqa: E402
 from backend.audio.tts import get_tts  # noqa: E402
+from backend.core.logging_config import read_last_lines, setup_logging  # noqa: E402
 from backend.memory.database import db  # noqa: E402
 
 
 # --- Configuração do Loguru ---
 
-# Remove o handler padrão do loguru para reconfigurar
-logger.remove()
-
-# Log no console com formato colorido
-logger.add(
-    sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-           "<level>{level: <8}</level> | "
-           "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-           "<level>{message}</level>",
-    level="DEBUG",
-    colorize=True,
-)
-
-# Log em arquivo com rotação diária e retenção de 30 dias
-_LOGS_DIR = _PROJECT_ROOT / "logs"
-_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-
-logger.add(
-    str(_LOGS_DIR / "app.log"),
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
-    level="INFO",
-    rotation="00:00",  # Rotação diária à meia-noite
-    retention="30 days",
-    compression="zip",
-    encoding="utf-8",
-)
+setup_logging()
 
 
 # --- Models ---
@@ -488,6 +462,26 @@ async def servir_audio(filename: str) -> FileResponse:
         media_type="audio/mpeg",
         filename=filename,
     )
+
+
+@app.get(
+    "/logs",
+    response_model=list[str],
+    summary="Ler logs da aplicação",
+    description="Retorna as últimas linhas do arquivo de log conforme tipo e limite.",
+)
+async def obter_logs(
+    tipo: str = Query(default="acoes", description="Tipo do log: acoes ou erros."),
+    limite: int = Query(default=50, ge=1, le=500, description="Número máximo de linhas."),
+) -> list[str]:
+    """Lê as últimas N linhas do arquivo de log conforme o tipo informado."""
+    try:
+        linhas = read_last_lines(tipo=tipo, limite=limite)
+        logger.debug("Endpoint /logs consultado: tipo={} limite={} linhas={}", tipo, limite, len(linhas))
+        return linhas
+    except Exception as exc:
+        logger.error("Erro ao consultar logs: {}", exc)
+        raise HTTPException(status_code=500, detail="Erro ao consultar logs.")
 
 
 # --- WebSocket ---
