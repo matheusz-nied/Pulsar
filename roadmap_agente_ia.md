@@ -969,7 +969,7 @@ Crie o arquivo backend/tools/music.py:
 
 ---
 
-## Muito difícil (Opus 4.6) TAREFA 3.5 — Sandboxing e confirmação verbal
+## Feita - Muito difícil (Opus 4.6) TAREFA 3.5 — Sandboxing e confirmação verbal
 
 **Prompt para o agente:**
 ```
@@ -1053,7 +1053,7 @@ Atualize backend/agent/agent.py para suportar fallback offline com Ollama:
 
 1. Adicionar classe OllamaAgent:
    - OLLAMA_BASE_URL do .env (default: http://localhost:11434)
-   - MODEL = "llama3.1:8b"
+   - MODEL = "gemma3:4b-it-qat"
    - async def processar(self, mensagem: str, historico: list[dict]) -> str:
      → Chama API local do Ollama: POST /api/chat
      → Mesmo formato de histórico

@@ -12,9 +12,10 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import AsyncIterator
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
-from anthropic import AsyncAnthropic
+from anthropic import APIConnectionError, APIStatusError, AsyncAnthropic, RateLimitError
 from anthropic.types import MessageParam, TextBlock
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -24,6 +25,24 @@ from langgraph.graph.message import MessagesState
 from langgraph.prebuilt import ToolNode, tools_condition
 from loguru import logger
 from pydantic import SecretStr
+
+
+# ============================================================================
+# RESPONSE TYPES
+# ============================================================================
+
+
+@dataclass
+class AgentResponse:
+    """Resposta do agente com metadados do modelo usado."""
+
+    resposta: str
+    modelo_usado: Literal["claude", "ollama", "erro"]
+
+
+# ============================================================================
+# PROTOCOLS
+# ============================================================================
 
 
 class LLMProvider(Protocol):
@@ -318,12 +337,13 @@ class ConversationAgent:
             # Modo legacy: provider direto, sem tools
             self._use_langgraph = False
             self.provider = provider
+            self.ollama_agent: OllamaAgent | None = None
             logger.info(
                 f"ConversationAgent inicializado (legacy, "
                 f"provider={provider.__class__.__name__})"
             )
         else:
-            # Modo LangGraph: ChatAnthropic + tools
+            # Modo LangGraph: ChatAnthropic + tools + fallback Ollama
             self._use_langgraph = True
 
             if api_key is None:
@@ -344,9 +364,12 @@ class ConversationAgent:
             self.llm_with_tools = self.llm.bind_tools(self.tools)
             self.graph = _construir_grafo(self.llm_with_tools, self.tools)
 
+            # Inicializa agente Ollama para fallback offline
+            self.ollama_agent = OllamaAgent()
+
             logger.info(
                 f"ConversationAgent inicializado com LangGraph "
-                f"(model={model}, tools={len(self.tools)})"
+                f"(model={model}, tools={len(self.tools)}, fallback_ollama=True)"
             )
 
     def _converter_historico(
@@ -504,7 +527,7 @@ class ConversationAgent:
         mensagem: str,
         historico: list[dict[str, str]],
         session_id: str = "default",
-    ) -> str:
+    ) -> AgentResponse:
         """
         Processa uma mensagem do usuário pelo grafo LangGraph.
 
@@ -515,6 +538,9 @@ class ConversationAgent:
         Antes do processamento normal, verifica se a mensagem é uma
         confirmação ou cancelamento de ação crítica pendente.
 
+        Fallback: Se Claude indisponível (APIConnectionError/RateLimitError),
+        tenta Ollama local. Se ambos falharem, retorna erro amigável.
+
         Args:
             mensagem: Mensagem atual do usuário.
             historico: Lista de mensagens anteriores no formato
@@ -522,10 +548,7 @@ class ConversationAgent:
             session_id: ID da sessão para persistência na memória vetorial.
 
         Returns:
-            Resposta gerada pelo agente.
-
-        Raises:
-            RuntimeError: Se houver erro no processamento.
+            AgentResponse com resposta e modelo_usado ("claude" | "ollama" | "erro").
         """
         from backend.agent.memory import vector_memory
 
@@ -537,7 +560,7 @@ class ConversationAgent:
                     mensagem, session_id
                 )
                 if resposta_seguranca is not None:
-                    return resposta_seguranca
+                    return AgentResponse(resposta=resposta_seguranca, modelo_usado="claude")
 
             contexto_vetorial = await self._buscar_contexto_vetorial(mensagem)
             mensagem_com_contexto = (
@@ -554,32 +577,74 @@ class ConversationAgent:
                 logger.debug(f"Resposta gerada (legacy): {resposta[:50]}...")
                 if vector_memory is not None:
                     await vector_memory.salvar_conversa(session_id, mensagem, resposta)
-                return resposta
+                return AgentResponse(resposta=resposta, modelo_usado="claude")
 
+            # Modo LangGraph: tenta Claude, fallback para Ollama
             messages = self._converter_historico(mensagem, historico, contexto_vetorial)
-            result = await self.graph.ainvoke({"messages": messages})
 
-            for msg in reversed(result["messages"]):
-                if (
-                    isinstance(msg, AIMessage)
-                    and msg.content
-                    and not msg.tool_calls
-                ):
-                    resposta = (
-                        msg.content
-                        if isinstance(msg.content, str)
-                        else str(msg.content)
-                    )
-                    logger.debug(f"Resposta gerada: {resposta[:50]}...")
+            try:
+                result = await self.graph.ainvoke({"messages": messages})
 
-                    if vector_memory is not None:
-                        await vector_memory.salvar_conversa(
-                            session_id, mensagem, resposta
+                for msg in reversed(result["messages"]):
+                    if (
+                        isinstance(msg, AIMessage)
+                        and msg.content
+                        and not msg.tool_calls
+                    ):
+                        resposta = (
+                            msg.content
+                            if isinstance(msg.content, str)
+                            else str(msg.content)
                         )
+                        logger.debug(f"Resposta gerada (Claude): {resposta[:50]}...")
 
-                    return resposta
+                        if vector_memory is not None:
+                            await vector_memory.salvar_conversa(
+                                session_id, mensagem, resposta
+                            )
 
-            return "Não foi possível gerar uma resposta."
+                        return AgentResponse(resposta=resposta, modelo_usado="claude")
+
+            except (APIConnectionError, RateLimitError, APIStatusError) as e:
+                # Claude indisponível - tenta fallback Ollama
+                logger.warning(f"Claude indisponível ({type(e).__name__}), usando Ollama local")
+
+                if self.ollama_agent and await self.ollama_agent.check_ollama():
+                    try:
+                        resposta = await self.ollama_agent.processar(mensagem, historico)
+                        logger.info(f"Resposta gerada via Ollama: {resposta[:50]}...")
+
+                        if vector_memory is not None:
+                            await vector_memory.salvar_conversa(
+                                session_id, mensagem, resposta
+                            )
+
+                        return AgentResponse(resposta=resposta, modelo_usado="ollama")
+
+                    except Exception as ollama_error:
+                        logger.error(f"Ollama também falhou: {ollama_error}")
+                        return AgentResponse(
+                            resposta=(
+                                "⚠️ Desculpe, estou com problemas de conexão. "
+                                "Meu servidor local também não está disponível no momento. "
+                                "Por favor, tente novamente em alguns instantes."
+                            ),
+                            modelo_usado="erro"
+                        )
+                else:
+                    logger.warning("Ollama não disponível para fallback")
+                    return AgentResponse(
+                        resposta=(
+                            "⚠️ Estou sem conexão com a internet e meu modo offline "
+                            "não está disponível. Verifique se o Ollama está rodando localmente."
+                        ),
+                        modelo_usado="erro"
+                    )
+
+            return AgentResponse(
+                resposta="Não foi possível gerar uma resposta.",
+                modelo_usado="erro"
+            )
 
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}")
@@ -599,6 +664,8 @@ class ConversationAgent:
         Busca contexto semântico antes de iniciar o streaming.
         O salvamento na memória vetorial deve ser feito pelo chamador
         após coletar a resposta completa.
+
+        Fallback: Se Claude indisponível, tenta Ollama local (sem streaming).
 
         Args:
             mensagem: Mensagem atual do usuário.
@@ -639,17 +706,40 @@ class ConversationAgent:
 
             messages = self._converter_historico(mensagem, historico, contexto_vetorial)
 
-            async for event in self.graph.astream_events(
-                {"messages": messages}, version="v2"
-            ):
-                if event["event"] == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-                    if (
-                        isinstance(chunk.content, str)
-                        and chunk.content
-                        and not getattr(chunk, "tool_call_chunks", None)
-                    ):
-                        yield chunk.content
+            # Tenta streaming com Claude, fallback para Ollama se falhar
+            try:
+                async for event in self.graph.astream_events(
+                    {"messages": messages}, version="v2"
+                ):
+                    if event["event"] == "on_chat_model_stream":
+                        chunk = event["data"]["chunk"]
+                        if (
+                            isinstance(chunk.content, str)
+                            and chunk.content
+                            and not getattr(chunk, "tool_call_chunks", None)
+                        ):
+                            yield chunk.content
+
+            except (APIConnectionError, RateLimitError, APIStatusError) as e:
+                # Claude indisponível no meio do streaming - fallback Ollama
+                logger.warning(f"Claude indisponível no streaming ({type(e).__name__}), usando Ollama")
+
+                if self.ollama_agent and await self.ollama_agent.check_ollama():
+                    try:
+                        resposta = await self.ollama_agent.processar(mensagem, historico)
+                        logger.info(f"Resposta via Ollama (fallback stream): {resposta[:50]}...")
+                        yield resposta
+                    except Exception as ollama_error:
+                        logger.error(f"Ollama falhou no streaming: {ollama_error}")
+                        yield (
+                            "⚠️ Estou com problemas de conexão. "
+                            "Por favor, tente novamente em alguns instantes."
+                        )
+                else:
+                    yield (
+                        "⚠️ Estou sem conexão e meu modo offline não está disponível. "
+                        "Verifique se o Ollama está rodando."
+                    )
 
         except Exception as e:
             logger.error(f"Erro ao processar mensagem (stream): {e}")
@@ -836,11 +926,32 @@ class OllamaProvider:
         """
         self.model = model
         self.base_url = base_url
+        self.timeout = 30.0
         self.system_prompt = (
             "Você é um assistente virtual local chamado Pulsar. "
             "Você é direto, eficiente e responde em português brasileiro. "
             "Quando não souber algo, diz claramente."
         )
+
+    async def check_ollama(self) -> bool:
+        """
+        Verifica se o servidor Ollama está acessível.
+
+        Returns:
+            True se o Ollama estiver online, False caso contrário.
+        """
+        try:
+            import httpx
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/api/tags",
+                    timeout=5.0,
+                )
+                return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"Ollama não disponível: {e}")
+            return False
 
     async def gerar_resposta(
         self, mensagem: str, historico: list[MessageParam]
@@ -857,7 +968,7 @@ class OllamaProvider:
                 response = await client.post(
                     f"{self.base_url}/api/chat",
                     json={"model": self.model, "messages": messages, "stream": False},
-                    timeout=60.0,
+                    timeout=self.timeout,
                 )
                 response.raise_for_status()
                 return response.json()["message"]["content"]
@@ -874,6 +985,49 @@ class OllamaProvider:
         """Fallback: gera resposta completa e yield como chunk único."""
         resposta = await self.gerar_resposta(mensagem, historico)
         yield resposta
+
+
+class OllamaAgent:
+    """
+    Wrapper do OllamaProvider para uso como fallback offline.
+
+    Fornece interface simplificada para o ConversationAgent
+    com verificação de conectividade.
+    """
+
+    def __init__(self) -> None:
+        """Inicializa o agente Ollama com configurações do .env."""
+        self.model = os.getenv("OLLAMA_MODEL", "gemma3:4b-it-qat")
+        self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.provider = OllamaProvider(model=self.model, base_url=self.base_url)
+
+    async def check_ollama(self) -> bool:
+        """
+        Verifica conectividade com o servidor Ollama.
+
+        Returns:
+            True se o Ollama estiver online.
+        """
+        return await self.provider.check_ollama()
+
+    async def processar(
+        self, mensagem: str, historico: list[dict[str, str]]
+    ) -> str:
+        """
+        Processa mensagem usando Ollama local.
+
+        Args:
+            mensagem: Mensagem do usuário.
+            historico: Histórico de conversas.
+
+        Returns:
+            Resposta gerada pelo Ollama.
+        """
+        # Converte histórico para formato MessageParam
+        historico_param: list[MessageParam] = [
+            {"role": msg["role"], "content": msg["content"]} for msg in historico
+        ]
+        return await self.provider.gerar_resposta(mensagem, historico_param)
 
 
 def create_agent_from_config(provider_name: str | None = None) -> ConversationAgent:

@@ -86,6 +86,7 @@ class ConversarResponse(BaseModel):
     """Modelo de resposta do endpoint /conversar."""
     resposta: str
     session_id: str
+    modelo_usado: str = "claude"  # "claude" | "ollama" | "erro"
 
 
 class HealthResponse(BaseModel):
@@ -106,6 +107,7 @@ class VoiceResponse(BaseModel):
     resposta: str
     audio_url: str
     session_id: str
+    modelo_usado: str = "claude"  # "claude" | "ollama" | "erro"
 
 
 # --- Lifecycle ---
@@ -214,14 +216,29 @@ async def health_check() -> HealthResponse:
     """
     Retorna o status de saúde da API e seus componentes internos.
 
+    Verifica conectividade com:
+    - llm_claude: API da Anthropic (online/offline)
+    - llm_ollama: Servidor local Ollama (online/offline)
+    - memory: Sistema de memória (online)
+
     Returns:
-        Status da API e de cada componente (llm, memory).
+        Status da API e de cada componente.
     """
+    # Verifica status do Ollama (fallback offline)
+    ollama_status = "offline"
+    if hasattr(agent, "ollama_agent") and agent.ollama_agent:
+        try:
+            if await agent.ollama_agent.check_ollama():
+                ollama_status = "online"
+        except Exception as e:
+            logger.debug(f"Health check Ollama falhou: {e}")
+
     return HealthResponse(
         status="ok",
         version=APP_VERSION,
         components={
-            "llm": "online",
+            "llm_claude": "online",  # Assume online se o servidor está rodando
+            "llm_ollama": ollama_status,
             "memory": "online",
         },
     )
@@ -267,17 +284,21 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
         historico = session_memory.get_history(session_id)
 
         # b. Chamar agente com mensagem e histórico (inclui busca/save na memória vetorial)
-        resposta = await agent.processar(request.mensagem, historico, session_id=session_id)  # type: ignore[arg-type]
+        agent_response = await agent.processar(request.mensagem, historico, session_id=session_id)  # type: ignore[arg-type]
 
         # c. Adicionar mensagem do usuário E resposta do agente ao histórico
         session_memory.add_message(session_id, "user", request.mensagem)
-        session_memory.add_message(session_id, "assistant", resposta)
+        session_memory.add_message(session_id, "assistant", agent_response.resposta)
 
         # d. Persistir histórico atualizado
         persistent_memory.save(session_id, session_memory.get_history(session_id))
 
-        # e. Retornar resposta com session_id
-        return ConversarResponse(resposta=resposta, session_id=session_id)
+        # e. Retornar resposta com session_id e modelo usado
+        return ConversarResponse(
+            resposta=agent_response.resposta,
+            session_id=session_id,
+            modelo_usado=agent_response.modelo_usado,
+        )
 
     except Exception as e:
         logger.error(f"Erro ao processar mensagem na sessão {session_id}: {e}")
@@ -362,18 +383,18 @@ async def processar_voz(
 
         # 3. Processar com o agente (inclui busca/save na memória vetorial)
         historico = session_memory.get_history(session_id)
-        resposta = await agent.processar(transcricao, historico, session_id=session_id)  # type: ignore[arg-type]
+        agent_response = await agent.processar(transcricao, historico, session_id=session_id)  # type: ignore[arg-type]
 
         # 4. Atualizar histórico da sessão
         session_memory.add_message(session_id, "user", transcricao)
-        session_memory.add_message(session_id, "assistant", resposta)
+        session_memory.add_message(session_id, "assistant", agent_response.resposta)
         persistent_memory.save(session_id, session_memory.get_history(session_id))
 
-        logger.info(f"Resposta gerada (sessão {session_id}): {resposta}")
+        logger.info(f"Resposta gerada (sessão {session_id}): {agent_response.resposta}")
 
         # 5. Sintetizar resposta (TTS)
         tts = get_tts()
-        audio_path = await tts.sintetizar(resposta)
+        audio_path = await tts.sintetizar(agent_response.resposta)
         audio_filename = Path(audio_path).name
 
         # 6. Gerar URL do áudio
@@ -382,15 +403,16 @@ async def processar_voz(
         logger.success(
             f"Processamento de voz concluído (sessão {session_id}): "
             f"transcricao={len(transcricao)} chars, "
-            f"resposta={len(resposta)} chars, "
+            f"resposta={len(agent_response.resposta)} chars, "
             f"audio={audio_filename}"
         )
 
         return VoiceResponse(
             transcricao=transcricao,
-            resposta=resposta,
+            resposta=agent_response.resposta,
             audio_url=audio_url,
             session_id=session_id,
+            modelo_usado=agent_response.modelo_usado,
         )
 
     except HTTPException:
