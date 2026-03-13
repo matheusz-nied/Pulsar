@@ -777,7 +777,7 @@ Adicionar ao requirements.txt: pyaudio
 
 ---
 
-## Muito difícil (Opus 4.6) TAREFA 3.1 — ChromaDB + embeddings
+## Feita - Muito difícil (Opus 4.6) TAREFA 3.1 — ChromaDB + embeddings
 
 **Prompt para o agente:**
 ```
@@ -900,7 +900,7 @@ Criar script separado: scripts/setup_google_auth.py que executa o fluxo OAuth2 u
 
 ---
 
-## Difícil (Opus 4.6?) TAREFA 3.4 — Tool: controle de música (YouTube Music)
+## Feita - Difícil (Opus 4.6?) TAREFA 3.4 — Tool: controle de música (YouTube Music)
 
 **Prompt para o agente:**
 ```
@@ -1013,7 +1013,7 @@ Crie o arquivo backend/security/sandbox.py:
 
 ---
 
-## TAREFA 4.1 — Telegram Bot
+## Difícil (Sonnet 4.6 Thinking) - TAREFA 4.1 — Telegram Bot
 
 **Prompt para o agente:**
 ```
@@ -1045,7 +1045,7 @@ Crie o arquivo telegram_bot/bot.py:
 
 ---
 
-## TAREFA 4.2 — Fallback Ollama (modo offline)
+## Difícil (Sonnet 4.6 Thinking) - TAREFA 4.2 — Fallback Ollama (modo offline)
 
 **Prompt para o agente:**
 ```
@@ -1078,7 +1078,7 @@ Atualize backend/agent/agent.py para suportar fallback offline com Ollama:
 
 ---
 
-## TAREFA 4.3 — Sistema de logs estruturado
+## Moderado (Codex) - TAREFA 4.3 — Sistema de logs estruturado
 
 **Prompt para o agente:**
 ```
@@ -1110,7 +1110,7 @@ Substituir todos os print() do projeto por logger.info/debug/error.
 
 ---
 
-## TAREFA 4.4 — Frontend Tauri (interface desktop)
+## Muito difícil (Opus 4.6) - TAREFA 4.4 — Frontend Tauri (interface desktop)
 
 **Prompt para o agente:**
 ```
@@ -1145,7 +1145,7 @@ Criar também scripts/start_all.sh que inicia backend + bot + frontend em parale
 
 ---
 
-## TAREFA 4.5 — Documentação e README
+##  Moderado (Sonnet 4.6 Thinking) - TAREFA 4.5 — Documentação e README
 
 **Prompt para o agente:**
 ```

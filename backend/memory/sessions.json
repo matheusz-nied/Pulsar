@@ -340,5 +340,35 @@
       "role": "assistant",
       "content": "Você pediu para eu guardar que prefere respostas curtas, de no máximo 1 frase."
     }
+  ],
+  "music-test-874dbcbf-8606-424b-8cb6-cc6182ca37fb": [
+    {
+      "role": "user",
+      "content": "Toca uma música do Coldplay"
+    },
+    {
+      "role": "assistant",
+      "content": "Erro ao tocar música do Coldplay no YouTube Music."
+    }
+  ],
+  "music2-25f92c0d-ebf2-4327-877e-a1d008429c8f": [
+    {
+      "role": "user",
+      "content": "Toca uma música do Coldplay"
+    },
+    {
+      "role": "assistant",
+      "content": "Erro técnico ao acessar YouTube Music."
+    }
+  ],
+  "music-final-27e7e182-e6ee-4945-90e5-47469bfaedbd": [
+    {
+      "role": "user",
+      "content": "Toca uma música do Coldplay"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Viva La Vida\" do Coldplay."
+    }
   ]
 }

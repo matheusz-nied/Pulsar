@@ -152,6 +152,7 @@ def _criar_tools() -> list[StructuredTool]:
     Returns:
         Lista de StructuredTool prontas para binding com o LLM.
     """
+    from backend.tools.music import controlar_musica
     from backend.tools.news import buscar_noticias
     from backend.tools.system import abrir_app, definir_alarme
     from backend.tools.web import buscar_web
@@ -190,6 +191,16 @@ def _criar_tools() -> list[StructuredTool]:
                 "Define um alarme ou lembrete para um horário específico. "
                 "Use quando o usuário pedir para ser lembrado de algo. "
                 "Formatos aceitos: 'HH:MM' ou 'HH:MM DD/MM/YYYY'."
+            ),
+        ),
+        StructuredTool.from_function(
+            coroutine=controlar_musica,
+            name="controlar_musica",
+            description=(
+                "Controla reprodução de música via YouTube Music. "
+                "Use quando o usuário pedir para tocar, pausar, pular música ou ajustar volume. "
+                "Parâmetro 'acao': tocar, pausar, proximo, volume. "
+                "Parâmetro 'query': nome da música/artista (para tocar) ou nível 0-100 (para volume)."
             ),
         ),
     ]
