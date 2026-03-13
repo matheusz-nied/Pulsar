@@ -10,13 +10,14 @@ Responsável por:
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from anthropic import AsyncAnthropic
 from anthropic.types import MessageParam, TextBlock
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.graph import StateGraph
 from langgraph.graph.message import MessagesState
@@ -141,7 +142,10 @@ SYSTEM_PROMPT = (
     "Você é direto, eficiente e responde em português brasileiro. "
     "Quando não souber algo, diz claramente. "
     "Você tem acesso a tools para buscar na web, buscar notícias, "
-    "abrir aplicativos e definir alarmes. Use-as quando necessário."
+    "abrir/fechar aplicativos, definir alarmes e controlar música. "
+    "Use-as quando necessário. "
+    "Ações críticas (como fechar aplicativos) requerem confirmação "
+    "do usuário antes de serem executadas."
 )
 
 
@@ -154,7 +158,7 @@ def _criar_tools() -> list[StructuredTool]:
     """
     from backend.tools.music import controlar_musica
     from backend.tools.news import buscar_noticias
-    from backend.tools.system import abrir_app, definir_alarme
+    from backend.tools.system import abrir_app, definir_alarme, fechar_app
     from backend.tools.web import buscar_web
 
     return [
@@ -203,6 +207,15 @@ def _criar_tools() -> list[StructuredTool]:
                 "Parâmetro 'query': nome da música/artista (para tocar) ou nível 0-100 (para volume)."
             ),
         ),
+        StructuredTool.from_function(
+            coroutine=fechar_app,
+            name="fechar_app",
+            description=(
+                "Fecha um aplicativo em execução. "
+                "Use quando o usuário pedir para fechar um programa. "
+                "Esta é uma ação crítica que requer confirmação do usuário."
+            ),
+        ),
     ]
 
 
@@ -213,8 +226,12 @@ def _construir_grafo(
     """
     Constrói o grafo do LangGraph com nós LLM e Tools.
 
+    O nó "tools" inclui um security gate que intercepta ações críticas
+    (definidas em ACOES_CRITICAS) e exige confirmação verbal do usuário
+    antes de executá-las.
+
     Fluxo:
-        START → llm → (tool_call?) → tools → llm → ... → END
+        START → llm → (tool_call?) → tools (security gate) → llm → ... → END
 
     Args:
         llm_with_tools: LLM com tools vinculadas.
@@ -223,14 +240,47 @@ def _construir_grafo(
     Returns:
         Grafo compilado do LangGraph.
     """
+    from backend.security.sandbox import security_manager
+
+    original_tool_node = ToolNode(tools)
+
     async def llm_node(state: MessagesState) -> dict[str, list[Any]]:
         """Nó LLM: chama Claude com as tools disponíveis."""
         response = await llm_with_tools.ainvoke(state["messages"])
         return {"messages": [response]}
 
+    async def secured_tools_node(state: MessagesState) -> dict[str, list[Any]]:
+        """Intercepta ações críticas e delega ações seguras ao ToolNode."""
+        last_message = state["messages"][-1]
+
+        if isinstance(last_message, AIMessage) and last_message.tool_calls:
+            critical = [
+                tc for tc in last_message.tool_calls
+                if security_manager.is_critica(tc["name"])
+            ]
+
+            if critical:
+                results: list[ToolMessage] = []
+                for tc in last_message.tool_calls:
+                    if security_manager.is_critica(tc["name"]):
+                        msg = security_manager.requer_confirmacao(
+                            tc["name"], tc["args"]
+                        )
+                    else:
+                        msg = (
+                            "Execução pausada: aguardando "
+                            "confirmação de ação crítica."
+                        )
+                    results.append(
+                        ToolMessage(content=msg, tool_call_id=tc["id"])
+                    )
+                return {"messages": results}
+
+        return await original_tool_node.ainvoke(state)
+
     graph = StateGraph(MessagesState)
     graph.add_node("llm", llm_node)
-    graph.add_node("tools", ToolNode(tools))
+    graph.add_node("tools", secured_tools_node)
     graph.set_entry_point("llm")
     graph.add_conditional_edges("llm", tools_condition)
     graph.add_edge("tools", "llm")
@@ -335,6 +385,59 @@ class ConversationAgent:
         messages.append(HumanMessage(content=mensagem))
         return messages
 
+    async def _verificar_confirmacao(
+        self,
+        mensagem: str,
+        session_id: str = "default",
+    ) -> str | None:
+        """
+        Verifica se a mensagem é uma confirmação ou cancelamento de ação crítica.
+
+        Args:
+            mensagem: Mensagem do usuário.
+            session_id: ID da sessão para salvar na memória vetorial.
+
+        Returns:
+            Resposta se for confirmação/cancelamento, None se for mensagem normal.
+        """
+        from backend.agent.memory import vector_memory
+        from backend.security.sandbox import security_manager
+
+        if not security_manager.tem_pendentes():
+            return None
+
+        texto = mensagem.strip()
+
+        confirmar_match = re.search(
+            r"(?i)\bconfirmar\s+([a-f0-9]{4})\b", texto
+        )
+        if confirmar_match:
+            token_parcial = confirmar_match.group(1)
+            sucesso, dados = security_manager.confirmar(token_parcial)
+            if sucesso and dados:
+                resposta = await self._executar_acao_confirmada(dados)
+            else:
+                resposta = (
+                    "❌ Token de confirmação inválido ou expirado. "
+                    "Tente novamente ou diga 'cancelar'."
+                )
+            if vector_memory is not None:
+                await vector_memory.salvar_conversa(
+                    session_id, mensagem, resposta
+                )
+            return resposta
+
+        if re.search(r"(?i)\bcancelar\b", texto):
+            count = security_manager.cancelar_todas()
+            resposta = f"✅ {count} ação(ões) pendente(s) cancelada(s)."
+            if vector_memory is not None:
+                await vector_memory.salvar_conversa(
+                    session_id, mensagem, resposta
+                )
+            return resposta
+
+        return None
+
     async def _buscar_contexto_vetorial(self, mensagem: str) -> str | None:
         """
         Busca contexto relevante na memória vetorial para enriquecer o prompt.
@@ -367,6 +470,35 @@ class ConversationAgent:
 
         return "\n\n".join(partes) if partes else None
 
+    async def _executar_acao_confirmada(self, dados: dict[str, Any]) -> str:
+        """
+        Executa uma ação previamente aprovada pelo SecurityManager.
+
+        Args:
+            dados: Dicionário com "acao" (nome da tool) e "params" (argumentos).
+
+        Returns:
+            Resultado da execução da tool.
+        """
+        from backend.agent.tools import TOOL_REGISTRY
+
+        acao = dados["acao"]
+        params = dados["params"]
+
+        if acao not in TOOL_REGISTRY:
+            return f"Erro: Tool '{acao}' não encontrada."
+
+        try:
+            tool_func = TOOL_REGISTRY[acao]["function"]
+            resultado = await tool_func(**params)
+            logger.info(
+                f"Ação confirmada executada: {acao} → {str(resultado)[:100]}"
+            )
+            return f"✅ {resultado}"
+        except Exception as e:
+            logger.error(f"Erro ao executar ação confirmada '{acao}': {e}")
+            return f"Erro ao executar ação: {str(e)}"
+
     async def processar(
         self,
         mensagem: str,
@@ -379,6 +511,9 @@ class ConversationAgent:
         O LLM decide se precisa chamar uma tool ou responder diretamente.
         Se chamar uma tool, o resultado é passado de volta ao LLM.
         Busca contexto semântico antes de chamar o LLM e salva a conversa após.
+
+        Antes do processamento normal, verifica se a mensagem é uma
+        confirmação ou cancelamento de ação crítica pendente.
 
         Args:
             mensagem: Mensagem atual do usuário.
@@ -397,6 +532,13 @@ class ConversationAgent:
         logger.info(f"Processando mensagem: {mensagem[:50]}...")
 
         try:
+            if self._use_langgraph:
+                resposta_seguranca = await self._verificar_confirmacao(
+                    mensagem, session_id
+                )
+                if resposta_seguranca is not None:
+                    return resposta_seguranca
+
             contexto_vetorial = await self._buscar_contexto_vetorial(mensagem)
             mensagem_com_contexto = (
                 f"{contexto_vetorial}\n\nPergunta atual do usuário: {mensagem}"
@@ -472,6 +614,14 @@ class ConversationAgent:
         logger.info(f"Processando mensagem (stream): {mensagem[:50]}...")
 
         try:
+            if self._use_langgraph:
+                resposta_seguranca = await self._verificar_confirmacao(
+                    mensagem, session_id
+                )
+                if resposta_seguranca is not None:
+                    yield resposta_seguranca
+                    return
+
             contexto_vetorial = await self._buscar_contexto_vetorial(mensagem)
             mensagem_com_contexto = (
                 f"{contexto_vetorial}\n\nPergunta atual do usuário: {mensagem}"
