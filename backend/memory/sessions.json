@@ -370,5 +370,23 @@
       "role": "assistant",
       "content": "Tocando \"Viva La Vida\" do Coldplay."
     }
+  ],
+  "ae4ed437-b161-4944-81c0-9a7c6bbcd615": [
+    {
+      "role": "user",
+      "content": "Ola"
+    },
+    {
+      "role": "assistant",
+      "content": "Olá! Como posso ajudar você hoje?"
+    },
+    {
+      "role": "user",
+      "content": "Toque acdc no youtube music para mim"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Back In Black\" do AC/DC! 🎵"
+    }
   ]
 }

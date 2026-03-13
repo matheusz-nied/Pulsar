@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pulsar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===== TITLEBAR (custom, decorations: false) ===== -->
+    <div id="titlebar" data-tauri-drag-region>
+      <span class="titlebar-title" data-tauri-drag-region>PULSAR</span>
+      <div class="titlebar-controls">
+        <button id="btn-minimize" class="titlebar-btn" title="Minimizar">_</button>
+        <button id="btn-close" class="titlebar-btn titlebar-btn-close" title="Fechar">X</button>
+      </div>
+    </div>
+
+    <!-- ===== VIEW: CHAT ===== -->
+    <div id="chat-view" class="view active">
+
+      <header id="chat-header">
+        <div class="header-left">
+          <span class="app-name">Pulsar</span>
+          <span id="status-indicator" class="status-dot offline" title="Desconectado"></span>
+        </div>
+        <div class="header-right">
+          <span id="model-label" class="model-badge">---</span>
+        </div>
+      </header>
+
+      <div id="chat-history">
+        <div id="chat-messages"></div>
+      </div>
+
+      <div id="chat-input-bar">
+        <textarea id="message-input" placeholder="Digite sua mensagem..." rows="1"></textarea>
+        <button id="mic-btn" class="icon-btn" title="Gravar voz">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
+        <button id="send-btn" class="icon-btn" title="Enviar">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+
+      <footer id="chat-footer">
+        <button id="robot-mode-btn" class="footer-btn" title="Modo Robô">
+          <span class="pixel-icon">&#x1F916;</span> Modo Robô
+        </button>
+        <button id="settings-btn" class="footer-btn" title="Configurações">
+          <span class="pixel-icon">&#x2699;</span>
+        </button>
+        <button id="clear-history-btn" class="footer-btn" title="Limpar histórico">
+          <span class="pixel-icon">&#x1F5D1;</span>
+        </button>
+      </footer>
+    </div>
+
+    <!-- ===== VIEW: ROBOT ===== -->
+    <div id="robot-view" class="view">
+      <div class="robot-bg-grid"></div>
+
+      <div class="robot-container">
+        <canvas id="robot-canvas" width="200" height="200"></canvas>
+        <div id="robot-name">PULSAR</div>
+        <div id="robot-status">INICIALIZANDO...</div>
+      </div>
+
+      <button id="chat-mode-btn" class="back-btn" title="Voltar ao Chat">
+        &#x2190; Chat
+      </button>
+    </div>
+
+    <!-- ===== SETTINGS MODAL ===== -->
+    <div id="settings-overlay" class="modal-overlay hidden">
+      <div id="settings-panel" class="modal-panel">
+        <div class="modal-header">
+          <h2>Configurações</h2>
+          <button id="settings-close-btn" class="modal-close-btn">X</button>
+        </div>
+        <div class="modal-body">
+
+          <!-- LLM -->
+          <section class="settings-section">
+            <h3>LLM</h3>
+            <div class="setting-row">
+              <label for="cfg-model">Modelo ativo</label>
+              <select id="cfg-model">
+                <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
+                <option value="ollama-llama3.1">Ollama Llama 3.1</option>
+                <option value="deepseek-chat">DeepSeek Chat</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label for="cfg-temperature">Temperatura: <span id="cfg-temperature-val">0.7</span></label>
+              <input type="range" id="cfg-temperature" min="0" max="1" step="0.1" value="0.7">
+            </div>
+            <div class="setting-row">
+              <label for="cfg-offline">Modo offline (forçar Ollama)</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cfg-offline">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <!-- Voz -->
+          <section class="settings-section">
+            <h3>Voz</h3>
+            <div class="setting-row">
+              <label for="cfg-voice-active">Voz ativa</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cfg-voice-active" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <label for="cfg-voice">Voz TTS</label>
+              <select id="cfg-voice">
+                <option value="pt-BR-FranciscaNeural">Feminina - Francisca</option>
+                <option value="pt-BR-AntonioNeural">Masculina - Antônio</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label for="cfg-speed">Velocidade: <span id="cfg-speed-val">1.0x</span></label>
+              <input type="range" id="cfg-speed" min="0.5" max="2" step="0.1" value="1.0">
+            </div>
+            <div class="setting-row">
+              <label for="cfg-wakeword">Wake word ativa</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cfg-wakeword">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <!-- Aparência -->
+          <section class="settings-section">
+            <h3>Aparência</h3>
+            <div class="setting-row">
+              <label for="cfg-ontop">Sempre no topo</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cfg-ontop" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <label for="cfg-startrobot">Iniciar na view robô</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="cfg-startrobot">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <label for="cfg-opacity">Opacidade: <span id="cfg-opacity-val">100%</span></label>
+              <input type="range" id="cfg-opacity" min="50" max="100" step="5" value="100">
+            </div>
+          </section>
+
+          <!-- Dados -->
+          <section class="settings-section">
+            <h3>Dados</h3>
+            <div class="setting-row setting-actions">
+              <button id="cfg-clear-memory" class="action-btn">Limpar memória vetorial</button>
+            </div>
+            <div class="setting-row setting-actions">
+              <button id="cfg-export-history" class="action-btn">Exportar histórico (JSON)</button>
+            </div>
+            <div class="setting-row setting-actions">
+              <button id="cfg-view-logs" class="action-btn">Ver logs</button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== LOGS MODAL ===== -->
+    <div id="logs-overlay" class="modal-overlay hidden">
+      <div id="logs-panel" class="modal-panel modal-panel-wide">
+        <div class="modal-header">
+          <h2>Logs</h2>
+          <button id="logs-close-btn" class="modal-close-btn">X</button>
+        </div>
+        <div class="modal-body">
+          <pre id="logs-content">Carregando...</pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="robot.js"></script>
+  <script src="settings.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

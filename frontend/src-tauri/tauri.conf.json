@@ -1,0 +1,40 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Pulsar",
+  "version": "0.1.0",
+  "identifier": "com.pulsar.assistente",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Pulsar",
+        "label": "main",
+        "width": 420,
+        "height": 680,
+        "minWidth": 420,
+        "minHeight": 680,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "resizable": false,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src http://localhost:8000 ws://localhost:8000 https://fonts.googleapis.com https://fonts.gstatic.com; media-src http://localhost:8000 'self'; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

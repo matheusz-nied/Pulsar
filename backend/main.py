@@ -142,17 +142,9 @@ app = FastAPI(
 # CORS configurado para desenvolvimento local
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8080",
-        "http://127.0.0.1",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8080",
-        "tauri://localhost",  # Tauri app
-    ],
+    # Em ambiente local/desktop (incluindo Tauri), é seguro liberar
+    # todas as origens para evitar problemas de preflight/OPTIONS.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
