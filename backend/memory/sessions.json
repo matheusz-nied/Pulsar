@@ -622,5 +622,129 @@
       "role": "assistant",
       "content": "Chrome aberto!"
     }
+  ],
+  "2f1b196f-2527-4bd6-a4b3-74a61d9968e9": [
+    {
+      "role": "user",
+      "content": "é toco a música para nós e boa"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Essa Noite É Nós\" da Banda Boa Toda."
+    }
+  ],
+  "45077310-d759-4658-8f63-cc986b79f0e5": [
+    {
+      "role": "user",
+      "content": "tocar de white buff"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"House of the Rising Sun\" (versão da temporada 4)."
+    }
+  ],
+  "6992f176-0bb4-47dc-be1b-da1d9043fcad": [
+    {
+      "role": "user",
+      "content": "tocar the white buffalo."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando músicas do The White Buffalo."
+    }
+  ],
+  "8c43ed00-7361-4d29-8c8c-06f8ba96c10f": [
+    {
+      "role": "user",
+      "content": "tocar de white book"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"In White Rooms\"."
+    }
+  ],
+  "660062a2-56a1-437d-a24e-9b64bf691ea2": [
+    {
+      "role": "user",
+      "content": "Tocar the white wolf."
+    },
+    {
+      "role": "assistant",
+      "content": "Desculpe, parece haver um problema técnico com o sistema de música no momento. Não consigo tocar \"The White Wolf\". Você pode tentar:\n\n1. Verificar se o YouTube Music está aberto\n2. Tentar tocar outra música primeiro\n3. Ou abrir o aplicativo de música manualmente\n\nPosso tentar abrir o aplicativo de música para você?"
+    },
+    {
+      "role": "user",
+      "content": "tocar the white buffalo."
+    },
+    {
+      "role": "assistant",
+      "content": "Problema técnico com o sistema de música. Chrome está aberto, mas não consigo controlar o YouTube Music. Você pode tentar manualmente no navegador."
+    }
+  ],
+  "e305fa48-4a16-46a6-82c9-3e9986c2989e": [
+    {
+      "role": "user",
+      "content": "do carro do áudio bufo."
+    },
+    {
+      "role": "assistant",
+      "content": "Não consegui entender completamente o que você está pedindo. Você poderia reformular ou dar mais detalhes sobre o que precisa? Por exemplo:\n\n- Você quer tocar uma música específica?\n- Precisa de informações sobre carros de áudio?\n- Quer buscar algo na web?\n\nMe explique melhor para que eu possa ajudá-lo."
+    },
+    {
+      "role": "user",
+      "content": "tocar the white buffal."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando músicas do The White Buffalo."
+    }
+  ],
+  "ebf44c5b-235e-4a0e-a618-d198274f0bbc": [
+    {
+      "role": "user",
+      "content": "tocar de white buffalo."
+    },
+    {
+      "role": "assistant",
+      "content": "Problema técnico com o sistema de música. O Chrome não conseguiu iniciar corretamente. Você pode tentar abrir o YouTube Music manualmente no navegador."
+    }
+  ],
+  "c8c4d697-5a5c-4503-b3d5-347b6ae8aaad": [
+    {
+      "role": "user",
+      "content": "tocar do átimo fogo."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Átomos\" do Zezé Di Camargo & Luciano."
+    }
+  ],
+  "530241f0-5c02-49a4-9911-1971dfe93750": [
+    {
+      "role": "user",
+      "content": "tocar the white book"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"The White Book\"."
+    }
+  ],
+  "de2e4c3d-c315-45c2-97be-70f402a7a959": [
+    {
+      "role": "user",
+      "content": "Tocar de oite confundo."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Não Confunda as Coisas\" do Hitmado das Blog 1.0."
+    },
+    {
+      "role": "user",
+      "content": "Tocando não confundas coisas doitimado das God 1.0."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Não Confunda as Coisas\" do Hitmado das Blog 1.0."
+    }
   ]
 }
