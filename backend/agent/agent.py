@@ -177,6 +177,7 @@ def _construir_grafo(
 
     async def llm_node(state: MessagesState) -> dict[str, list[Any]]:
         """Nó LLM: chama o LLM configurado com as tools disponíveis."""
+        logger.info(f"Chamando LLM: {llm_with_tools.model} (provider: {type(llm_with_tools).__name__})")
         response = await llm_with_tools.ainvoke(state["messages"])
         return {"messages": [response]}
 
@@ -235,7 +236,7 @@ class ConversationAgent:
         self,
         llm: BaseChatModel | None = None,
         api_key: str | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-haiku-4-5",
     ) -> None:
         """
         Inicializa o agente de conversação.
@@ -744,7 +745,7 @@ def create_agent_from_config(provider_name: str | None = None) -> ConversationAg
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY não configurada no .env")
-        model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+        model = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
         llm = ChatAnthropic(
             model_name=model,
             api_key=SecretStr(api_key),

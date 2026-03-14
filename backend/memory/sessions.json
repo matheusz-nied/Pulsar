@@ -586,5 +586,41 @@
       "role": "assistant",
       "content": "Chrome aberto!"
     }
+  ],
+  "74d3e2da-4430-4c32-a56a-1b96c77db811": [
+    {
+      "role": "user",
+      "content": "de gelos"
+    },
+    {
+      "role": "assistant",
+      "content": "Não entendi completamente o que você quer dizer com \"de gelos\"."
+    }
+  ],
+  "bd6b27d2-d41e-4c9c-bf0a-7aceccee6056": [
+    {
+      "role": "user",
+      "content": "que dia é hoje."
+    },
+    {
+      "role": "assistant",
+      "content": "Hoje é 19 de dezembro de 2024, quinta-feira."
+    },
+    {
+      "role": "user",
+      "content": "Abdeu-vos, Chrome."
+    },
+    {
+      "role": "assistant",
+      "content": "Antes de fechar o Google Chrome, você confirma que quer mesmo encerrar o aplicativo?"
+    },
+    {
+      "role": "user",
+      "content": "abrir Google Chrome."
+    },
+    {
+      "role": "assistant",
+      "content": "Chrome aberto!"
+    }
   ]
 }

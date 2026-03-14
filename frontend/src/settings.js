@@ -6,7 +6,7 @@
  */
 
 const SETTINGS_DEFAULTS = {
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-haiku-4-5',
   temperature: 0.7,
   offlineMode: false,
   voiceActive: true,
