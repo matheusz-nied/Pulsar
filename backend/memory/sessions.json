@@ -504,5 +504,87 @@
       "role": "assistant",
       "content": "Tocando \"Back In Black\" do AC/DC! 🎵"
     }
+  ],
+  "e59c1480-590d-4514-b79c-b61ac2a195a4": [
+    {
+      "role": "user",
+      "content": "que... que dia é hoje!"
+    },
+    {
+      "role": "assistant",
+      "content": "Hoje é 19 de dezembro de 2024, quinta-feira."
+    },
+    {
+      "role": "user",
+      "content": "tocar a larme daqui 2 minutos."
+    },
+    {
+      "role": "assistant",
+      "content": "Preciso do horário no formato HH:MM para definir o alarme."
+    },
+    {
+      "role": "user",
+      "content": "Estou fazendo o meu trabalho de TCC, o projeto final de conclusão de curso, eu sou da engenharia de computação. O meu título é a sistema autônomo de diagnóstico, em monitoramento de qualidade e energia baseado em IoT e em inteligência oficial. Me ajude como..."
+    },
+    {
+      "role": "assistant",
+      "content": "Encontrei material relevante para seu TCC! Aqui estão as principais direções:\n\n## **Áreas Chave para Explorar:**\n\n**1. Monitoramento de Qualidade de Energia com IA**\n- Redes neurais convolucionais (CNNs) e LSTM\n- Extração automática de características\n- Análise de dados em tempo real\n\n**2. Sistemas IoT para Diagnóstico**\n- Sensores inteligentes em painéis elétricos\n- Coleta e transmissão de dados remotos\n- Tomada de decisões autônomas\n\n**3. Aplicações Práticas**\n- Diagnóstico de falhas automatizado\n- Otimização de sistemas elétricos\n- Manutenção preditiva\n\n## **Fontes Acadêmicas Encontradas:**\n- Projeto UFSM com Fox IoT sobre diagnóstico automatizado\n- Artigo sobre redes neurais no setor elétrico (Qualis B2)\n- Sistemas DERMS para gerenciamento de energia distribuída\n\nPrecisa de ajuda específica com algum tópico ou quer que eu busque mais detalhes sobre metodologia, arquitetura do sistema ou revisão bibliográfica?"
+    },
+    {
+      "role": "user",
+      "content": "Calma a última pergunta que eu te fiz."
+    },
+    {
+      "role": "assistant",
+      "content": "A última pergunta que você fez foi \"que... que dia é hoje!\" e eu respondi que hoje é 19 de dezembro de 2024, quinta-feira."
+    },
+    {
+      "role": "user",
+      "content": "como o dedo de LDM você é."
+    },
+    {
+      "role": "assistant",
+      "content": "Não entendi a expressão \"como o dedo de LDM\". Pode explicar o que isso significa?"
+    },
+    {
+      "role": "user",
+      "content": "É como o delo de inteligência artificial você é."
+    },
+    {
+      "role": "assistant",
+      "content": "Sou o Pulsar, um assistente virtual local. Sou baseado em IA (inteligência artificial) e funciono através de um modelo de linguagem grande (LLM). \n\nMinha função é ajudar você com tarefas como buscar informações, controlar aplicativos, definir lembretes e outras atividades no seu computador.\n\nEm que posso ajudar?"
+    },
+    {
+      "role": "user",
+      "content": "virtual local, sou baseado em inteligência artificial, inteligência artificial e funciona através de um modelo de linguagem grande, L&N. Minha função é ajudar você contaretas como buscar informações, controlar aplicativos, definir lembretes e outras atividades no seu computador, em que possa ajudar."
+    },
+    {
+      "role": "assistant",
+      "content": "Exato! Você resumiu bem o que sou:\n\n- **Pulsar** - assistente virtual local\n- Baseado em **IA** com modelo de linguagem (LLM)\n- Ajudo com **tarefas práticas**: buscar info, controlar apps, lembretes, etc.\n\nEstou aqui e pronto para ajudar. O que precisa?"
+    },
+    {
+      "role": "user",
+      "content": "Quais ferramentas você tem disponível para fazer?"
+    },
+    {
+      "role": "assistant",
+      "content": "Tenho 6 ferramentas: buscar na web, buscar notícias, abrir/fechar apps, definir alarmes e controlar música."
+    },
+    {
+      "role": "user",
+      "content": "Quais exemplos você consegue abrir?"
+    },
+    {
+      "role": "assistant",
+      "content": "Consigo abrir programas como Chrome, Word, Excel, Notepad, Calculator, Spotify, Discord, Steam, etc."
+    },
+    {
+      "role": "user",
+      "content": "abriu Google Chrome"
+    },
+    {
+      "role": "assistant",
+      "content": "Chrome aberto!"
+    }
   ]
 }
