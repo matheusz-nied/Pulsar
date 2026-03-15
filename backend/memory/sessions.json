@@ -746,5 +746,97 @@
       "role": "assistant",
       "content": "Tocando \"Não Confunda as Coisas\" do Hitmado das Blog 1.0."
     }
+  ],
+  "1ce01bb4-539d-4a28-8aca-7205e0a3ac53": [
+    {
+      "role": "user",
+      "content": "tocar de o ar de búforo."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"House of the Rising Sun\" do The White Buffalo."
+    },
+    {
+      "role": "user",
+      "content": "Quais as notícias de hoje?"
+    },
+    {
+      "role": "assistant",
+      "content": "Aqui estão as principais notícias de hoje:\n\n**Principais destaques:**\n\n1. **Travis Kalanick (ex-Uber)** está começando uma nova empresa de carros autônomos com apoio da Uber\n2. **Google Pixel 10A** - review negativo: recomendam comprar o 9A em vez do novo modelo\n3. **Asus** lançou fones de ouvido abertos para jogos em portáteis\n4. **Dreo** tem promoção de primavera com descontos em air fryer, aquecedor e ventiladores\n5. **Ferramenta de IA** para executar prompts de LLM local em sessões SSH remotas\n\nAs notícias são principalmente sobre tecnologia, com foco em hardware, startups e ferramentas de desenvolvimento."
+    },
+    {
+      "role": "user",
+      "content": "Eu quero notícias sobre finanças e economia."
+    },
+    {
+      "role": "assistant",
+      "content": "Aqui estão as principais notícias de finanças e economia:\n\n**Principais destaques:**\n\n1. **MGM Osaka** - MGM Resorts acredita que seu cassino em Osaka, Japão, pode competir com o Marina Bay Sands de Singapura em rentabilidade. Investimento pesado apostando na população japonesa e proximidade com cidades chinesas.\n\n2. **Venda de ações da Intuit** - Representante Rick W. Allen vendeu entre US$15.001 e US$50.000 em ações da Intuit (NASDAQ:INTU). Transação ocorreu em meio a outras atividades de insiders.\n\n3. **Intel lança novos processadores** - Intel (NASDAQ:INTC) lançou série Core Ultra 200S Plus de processadores desktop, com maior contagem de núcleos e frequência aprimorada para jogos.\n\n4. **Formação profissional em estaleiros** - 70 aprendizes se formaram no programa de treinamento da HII's Ingalls Shipbuilding no Mississippi, combinando instrução em sala de aula com treinamento remunerado.\n\n5. **Realty Income Corp** - REIT de dividendos mensais com classificação \"Hold\" dos analistas, refletindo cautela devido às altas taxas de juros, mas reconhecendo confiabilidade de dividendos.\n\nAs notícias cobrem setores de cassinos, tecnologia, imóveis e formação profissional, refletindo diferentes aspectos do mercado financeiro e econômico."
+    }
+  ],
+  "9fdc26b0-f202-44c3-b605-e8f0c68a81c2": [
+    {
+      "role": "user",
+      "content": "Eu quero notícia sobre o bitcoin, será que compensa comprar o bitcoin ainda?"
+    },
+    {
+      "role": "assistant",
+      "content": "Com base nas informações encontradas:\n\n**Bitcoin em 2024:**\n- Há otimismo entre analistas para alta até final de 2024/início 2025\n- Mercado de criptomoedas continua volátil\n- Riscos significativos existem\n\n**Se compensa comprar:**\nDepende do seu perfil de investidor:\n- **Para conservadores:** Alto risco, pode não compensar\n- **Para moderados/arrojados:** Pode ser parte diversificada da carteira\n- **Importante:** Só invista o que pode perder\n\n**Recomendações:**\n1. Estude bem antes de investir\n2. Comece com valores pequenos\n3. Diversifique seus investimentos\n4. Considere o longo prazo (5+ anos)\n\nQuer que busque informações mais específicas sobre preço atual ou análise técnica?"
+    }
+  ],
+  "05a3fa42-0a04-4c84-af58-34f58c18155e": [
+    {
+      "role": "user",
+      "content": "que é a informação sobre a análise técnica."
+    },
+    {
+      "role": "assistant",
+      "content": "Análise técnica é um método usado no mercado financeiro para prever movimentos de preços de ativos. \n\n**O que é:**\n- Estuda gráficos com histórico de preços\n- Usa padrões e indicadores técnicos\n- Tenta prever tendências futuras\n\n**Principais pontos:**\n- Foca em preços e volume\n- Usa gráficos para identificar padrões\n- Baseia-se em tendências históricas\n- Usada por traders e investidores\n\n**Objetivo:** Prever direção dos preços para tomar decisões de compra/venda.\n\nÉ diferente da análise fundamentalista, que estuda dados da empresa."
+    }
+  ],
+  "6f8f229e-7d30-4ff5-85e7-42f42f76dde4": [
+    {
+      "role": "user",
+      "content": "Estou com uma música boa no YouTube para nós."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"A Nossa Praia É Amar\" no YouTube Music."
+    }
+  ],
+  "de6e7dd3-1179-4b9f-b870-6817429201d0": [
+    {
+      "role": "user",
+      "content": "que dia é hoje."
+    },
+    {
+      "role": "assistant",
+      "content": "Hoje é 19 de dezembro de 2024, quinta-feira."
+    },
+    {
+      "role": "user",
+      "content": "Toque uma música boa para a gente no YouTube."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Amiga da Minha Mulher\" no YouTube Music."
+    },
+    {
+      "role": "user",
+      "content": "Eu quero uma música no estilo Bois. Bois."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Boi Soberano\" no estilo Bois para você."
+    }
+  ],
+  "77ab31cb-35d4-4d2c-9c36-693f70bf6bae": [
+    {
+      "role": "user",
+      "content": "Toque uma música blois"
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando \"Trilogy in Blois\"."
+    }
   ]
 }

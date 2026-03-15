@@ -39,8 +39,8 @@ CHANNELS = 1
 
 # Detecção de silêncio após wake word
 SILENCE_THRESHOLD = 0.010    # RMS abaixo disso = silêncio (mais permissivo)
-SILENCE_DURATION = 2.0       # segundos contínuos de silêncio para encerrar
-MIN_SPEECH_DURATION = 1.0    # espera mínima antes de checar silêncio
+SILENCE_DURATION = 1.0       # segundos contínuos de silêncio para encerrar (aumentado)
+MIN_SPEECH_DURATION = 0.8    # espera mínima antes de checar silêncio (aumentado)
 MAX_RECORD_DURATION = 20.0   # segundos máximos de gravação
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -155,7 +155,8 @@ def _record_until_silence() -> np.ndarray | None:
 
     audio = np.concatenate(chunks, axis=0).flatten()
     duration = len(audio) / RECORD_SAMPLE_RATE
-    logger.info(f"Gravação concluída: {duration:.2f}s")
+    rms_medio = float(np.sqrt(np.mean(audio ** 2)))
+    logger.info(f"Gravação concluída: {duration:.2f}s (RMS médio: {rms_medio:.4f})")
 
     return audio
 

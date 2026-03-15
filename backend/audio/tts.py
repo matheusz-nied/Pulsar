@@ -7,6 +7,7 @@ com sistema de cache baseado em hash MD5 para evitar regerar áudios idênticos.
 
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -59,6 +60,14 @@ class EdgeTTS:
         conteudo = f"{texto}:{voice}"
         return hashlib.md5(conteudo.encode("utf-8")).hexdigest()
     
+    def _limpar_markdown(self, texto: str) -> str:
+        """Remove formatações Markdown (asteriscos, crases, etc) para o TTS não ler os caracteres."""
+        # Limpar blocos de código
+        texto = re.sub(r'```.*?```', '', texto, flags=re.DOTALL)
+        # Limpar caracteres de formatação Markdown
+        texto = re.sub(r'[*_~`#]', '', texto)
+        return texto.strip()
+    
     async def sintetizar(
         self, 
         texto: str, 
@@ -88,26 +97,32 @@ class EdgeTTS:
         # Define voz padrão se não especificada
         voice = voice or self.VOICE_PT
         
+        # Limpar formatações Markdown que atrapalham a fala (asteriscos, negrito, etc)
+        texto_limpo = self._limpar_markdown(texto)
+        if not texto_limpo:
+            raise ValueError("Texto ficou vazio após limpar caracteres Markdown")
+        
         # Gera hash e path do arquivo
-        file_hash = self._gerar_hash(texto, voice)
+        file_hash = self._gerar_hash(texto_limpo, voice)
         output_path = self.cache_path / f"{file_hash}.mp3"
         
         # Verifica se já existe no cache
         if output_path.exists():
             logger.info(
                 f"Áudio encontrado no cache: {output_path.name} "
-                f"({len(texto)} caracteres)"
+                f"({len(texto_limpo)} caracteres)"
             )
             return str(output_path.absolute())
         
         # Gera novo áudio
         logger.info(
-            f"Sintetizando áudio: {len(texto)} caracteres "
+            f"Sintetizando áudio: {len(texto_limpo)} caracteres "
             f"(voz={voice}, hash={file_hash})"
         )
         
         try:
-            communicate = edge_tts.Communicate(texto, voice=voice)
+            # rate="+25%" acelera a fala da IA em 25%
+            communicate = edge_tts.Communicate(texto_limpo, voice=voice, rate="+15%")
             await communicate.save(str(output_path))
             
             logger.success(

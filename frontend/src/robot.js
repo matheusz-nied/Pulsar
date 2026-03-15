@@ -11,16 +11,18 @@ const GRID = 50;
 const CANVAS_SIZE = 200;
 
 const COLORS = {
-  bg:      '#0a0a0a',
-  dim:     '#2a2a2a',
-  primary: '#00ff88',
-  blue:    '#00aaff',
-  yellow:  '#ffaa00',
-  orange:  '#ff6600',
-  red:     '#ff0000',
+  bg:      '#020205',
+  dim:     '#1a1a2e',
+  primary: '#00f2ff', // Cyan elétrico
+  secondary:'#7000ff', // Roxo tático
+  blue:    '#0077ff',
+  yellow:  '#fdfd96',
+  orange:  '#ff9f1c',
+  red:     '#ff4d4d',
   white:   '#ffffff',
-  face:    '#141428',
-  outline: '#1e1e3a',
+  face:    '#080812',
+  core:    '#121225',
+  glow:    'rgba(0, 242, 255, 0.4)',
 };
 
 const ESTADOS = {
@@ -312,15 +314,7 @@ class RobotAnimator {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-    ctx.save();
-    ctx.translate(this.headOffsetX * BLOCK, this.headOffsetY * BLOCK);
-
     this._drawFace(ctx);
-    this._drawEyes(ctx);
-    this._drawMouth(ctx);
-
-    ctx.restore();
-
     this._drawEffects(ctx);
   }
 
@@ -339,33 +333,167 @@ class RobotAnimator {
   /* ---- Face ---- */
 
   _drawFace(ctx) {
-    // Head outline (rounded rect in pixel blocks)
-    const x = 8, y = 10, w = 34, h = 28;
-    this._rect(x + 1, y, w - 2, h, COLORS.outline);
-    this._rect(x, y + 1, w, h - 2, COLORS.outline);
+    const cx = CANVAS_SIZE / 2;
+    const cy = CANVAS_SIZE / 2;
+    const time = this.t / 1000;
+    const stateColor = this._getEyeColor();
 
-    // Face fill
-    this._rect(x + 2, y + 1, w - 4, h - 2, COLORS.face);
-    this._rect(x + 1, y + 2, w - 2, h - 4, COLORS.face);
+    // 1. Aura Volumétrica (Bloom)
+    const auraPulse = 0.4 + Math.sin(time * 2) * 0.1;
+    const auraGrad = ctx.createRadialGradient(cx, cy, 40, cx, cy, 95);
+    auraGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    auraGrad.addColorStop(0.5, stateColor + '10'); // Transparência hex
+    auraGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = auraGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 100, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Antenna
-    const antX = 25;
-    this._rect(antX, y - 4, 1, 4, COLORS.outline);
+    // 2. Esfera Central (O "Core")
+    ctx.save();
+    ctx.translate(cx, cy);
+    
+    // Efeito de flutuação orgânica
+    const floatX = Math.sin(time * 1.5) * 3;
+    const floatY = Math.cos(time * 1.2) * 4;
+    ctx.translate(floatX, floatY);
 
-    // Antenna tip glow
-    const glowColor = this._getEyeColor();
-    this._px(antX - 1, y - 5, glowColor);
-    this._px(antX, y - 5, glowColor);
-    this._px(antX + 1, y - 5, glowColor);
-    this._px(antX, y - 6, glowColor);
+    // Corpo esférico metálico/vidro
+    const bodyGrad = ctx.createRadialGradient(-15, -20, 5, 0, 0, 60);
+    bodyGrad.addColorStop(0, '#2a2a4a');
+    bodyGrad.addColorStop(0.5, COLORS.face);
+    bodyGrad.addColorStop(1, '#050508');
+    
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = stateColor + '40';
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
 
-    // Cheek accents
-    if (this.estado === ESTADOS.SUCESSO || this.estado === ESTADOS.ESCUTANDO) {
-      ctx.globalAlpha = 0.15;
-      this._rect(11, 27, 4, 2, '#ff6688');
-      this._rect(35, 27, 4, 2, '#ff6688');
-      ctx.globalAlpha = 1;
+    // 3. Anéis Orbitais (Personalidade Doida)
+    ctx.rotate(time * 0.5);
+    for (let i = 0; i < 2; i++) {
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 75 + i * 5, 25, (i * Math.PI / 2) + time * 0.2, 0, Math.PI * 2);
+        ctx.strokeStyle = stateColor;
+        ctx.lineWidth = 0.5;
+        ctx.globalAlpha = 0.2 + Math.sin(time + i) * 0.1;
+        ctx.stroke();
+        
+        // Pequenos nós de energia nos anéis
+        const nodePos = time * (1 + i * 0.5);
+        const nx = Math.cos(nodePos) * (75 + i * 5);
+        const ny = Math.sin(nodePos) * 25;
+        ctx.fillStyle = COLORS.white;
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 1.5, 0, Math.PI * 2);
+        ctx.fill();
     }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // 4. Interface Holográfica (Sobreposta ao Core)
+    this._drawHolographicFace(ctx, cx + floatX, cy + floatY);
+  }
+
+  _drawHolographicFace(ctx, x, y) {
+    const time = this.t / 1000;
+    const color = this._getEyeColor();
+    
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Linhas de varredura tática dentro da esfera
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.1;
+    for(let i = -40; i <= 40; i += 8) {
+        ctx.beginPath();
+        ctx.moveTo(-45, i);
+        ctx.lineTo(45, i);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    this._drawDeepEyes(ctx, color);
+    this._drawEnergyMouth(ctx, color);
+    
+    ctx.restore();
+  }
+
+  _drawDeepEyes(ctx, color) {
+    const time = this.t / 1000;
+    const eyeY = -5;
+    const eyeSpacing = 18;
+
+    [-1, 1].forEach(dir => {
+        const ex = dir * eyeSpacing;
+        
+        // Camada 1: Brilho de profundidade (Holograma)
+        const eyeGrad = ctx.createRadialGradient(ex, eyeY, 0, ex, eyeY, 12);
+        eyeGrad.addColorStop(0, color);
+        eyeGrad.addColorStop(0.4, color + '40');
+        eyeGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        
+        ctx.fillStyle = eyeGrad;
+        ctx.beginPath();
+        ctx.arc(ex, eyeY, 12, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Camada 2: A íris "tecnológica"
+        ctx.strokeStyle = COLORS.white;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.arc(ex, eyeY, 6 * this.eyeOpenness, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Camada 3: Pupila reativa (Micro-vibração)
+        const pupSize = 2 + Math.sin(time * 20) * 0.3;
+        ctx.fillStyle = COLORS.white;
+        ctx.beginPath();
+        ctx.arc(ex, eyeY, pupSize * this.eyeOpenness, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    });
+  }
+
+  _drawEnergyMouth(ctx, color) {
+    const time = this.t / 1000;
+    const my = 20;
+    
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    if (this.estado === ESTADOS.FALANDO) {
+        // Visualizador de espectro circular
+        for(let a = 0; a < Math.PI * 2; a += 0.2) {
+            const r = 8 + Math.abs(Math.sin(a * 2 + time * 10)) * 6;
+            const x = Math.cos(a) * r;
+            const y = my + Math.sin(a) * r * 0.5;
+            if (a === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+    } else if (this.estado === ESTADOS.ESCUTANDO) {
+        // Pulso de escuta (Sinewave de energia)
+        for(let i = -20; i <= 20; i += 2) {
+            const v = Math.sin(i * 0.2 + time * 15) * 5;
+            if (i === -20) ctx.moveTo(i, my + v);
+            else ctx.lineTo(i, my + v);
+        }
+    } else {
+        // Ocioso: Linha de energia estável com partículas
+        ctx.moveTo(-15, my);
+        ctx.bezierCurveTo(-5, my + 2, 5, my + 2, 15, my);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
   }
 
   /* ---- Eyes ---- */
@@ -414,41 +542,84 @@ class RobotAnimator {
   }
 
   _drawSingleEye(ex, ey, ew, eh, color, pupilPos) {
-    // Eye background
-    this._rect(ex, ey, ew, eh, color);
+    const ctx = this.ctx;
+    const time = this.t / 1000;
 
-    // Pupil
+    // Eye Glow
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = color;
+    
+    // Outer glass of the eye
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.roundRect(ex * BLOCK, ey * BLOCK, ew * BLOCK, eh * BLOCK, 4);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Pupil (Retina scanner look)
     if (eh >= 2) {
-      let px = ex + Math.floor(ew / 2) - 1;
-      let py = ey + Math.floor(eh / 2);
-      const ps = this.estado === ESTADOS.ESCUTANDO ? 3 : 2;
+      let px = (ex + ew / 2) * BLOCK;
+      let py = (ey + eh / 2) * BLOCK;
+      
+      if (pupilPos === 'up-right') { px += BLOCK; py -= BLOCK; }
+      
+      // Pupil Core
+      ctx.shadowBlur = 5;
+      ctx.fillStyle = COLORS.face;
+      ctx.beginPath();
+      ctx.arc(px, py, (BLOCK * 0.8), 0, Math.PI * 2);
+      ctx.fill();
 
-      if (pupilPos === 'up-right') { px += 1; py -= 1; }
-
-      this._rect(px, py - 1, ps, ps, COLORS.face);
-
-      // Highlight
-      this._px(px, py - 1, COLORS.white);
+      // Laser scan line (futuristic effect)
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.5;
+      const scanY = ey * BLOCK + (Math.sin(time * 5) * 0.5 + 0.5) * (eh * BLOCK);
+      ctx.beginPath();
+      ctx.moveTo(ex * BLOCK, scanY);
+      ctx.lineTo((ex + ew) * BLOCK, scanY);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
+    ctx.shadowBlur = 0;
   }
 
   _drawXEye(ex, ey, ew, eh, color) {
-    const cx = ex + Math.floor(ew / 2);
-    const cy = ey + Math.floor(eh / 2);
-    for (let i = -2; i <= 2; i++) {
-      this._px(cx + i, cy + i, color);
-      this._px(cx + i, cy - i, color);
-    }
+    const ctx = this.ctx;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
+    
+    [-1, 1].forEach(dir => {
+      const x = dir * 18;
+      const y = -5;
+      ctx.beginPath();
+      ctx.moveTo(x - 8, y - 8);
+      ctx.lineTo(x + 8, y + 8);
+      ctx.moveTo(x + 8, y - 8);
+      ctx.lineTo(x - 8, y + 8);
+      ctx.stroke();
+    });
+    ctx.shadowBlur = 0;
   }
 
   _drawHappyEye(ex, ey, ew, eh, color) {
-    const w = ew;
-    const baseY = ey + 1;
-    for (let i = 0; i < w; i++) {
-      const curve = (i === 0 || i === w - 1) ? 0 : (i === 1 || i === w - 2) ? -1 : -2;
-      this._px(ex + i, baseY - curve, color);
-      if (curve < -1) this._px(ex + i, baseY - curve + 1, color);
-    }
+    const ctx = this.ctx;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
+
+    [-1, 1].forEach(dir => {
+      const x = dir * 18;
+      const y = -2;
+      ctx.beginPath();
+      ctx.arc(x, y, 10, Math.PI, 0, false);
+      ctx.stroke();
+    });
+    ctx.shadowBlur = 0;
   }
 
   _getEyeColor() {
@@ -469,68 +640,97 @@ class RobotAnimator {
   /* ---- Mouth ---- */
 
   _drawMouth(ctx) {
-    const cx = 25, my = 30;
+    const cx = 25 * BLOCK, my = 30 * BLOCK;
+    const time = this.t / 1000;
+    const color = this._getEyeColor();
+
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
 
     switch (this.estado) {
       case ESTADOS.DORMINDO:
-        this._rect(cx - 2, my, 5, 1, COLORS.dim);
+        ctx.beginPath();
+        ctx.moveTo(cx - 10, my);
+        ctx.lineTo(cx + 10, my);
+        ctx.stroke();
         break;
 
       case ESTADOS.OCIOSO:
       case ESTADOS.ACORDANDO:
-        // Slight smile
-        this._rect(cx - 3, my, 7, 1, COLORS.primary);
-        this._px(cx - 4, my - 1, COLORS.primary);
-        this._px(cx + 4, my - 1, COLORS.primary);
+        // Pulsing Bio-line
+        ctx.lineWidth = 2 + Math.sin(time * 3) * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - 15, my);
+        ctx.bezierCurveTo(cx - 5, my + 5, cx + 5, my + 5, cx + 15, my);
+        ctx.stroke();
         break;
 
       case ESTADOS.ESCUTANDO:
-        // Slightly open
-        this._rect(cx - 2, my, 5, 1, COLORS.blue);
-        this._rect(cx - 1, my + 1, 3, 1, COLORS.blue);
+        // Waveform mouth
+        ctx.beginPath();
+        for (let i = -20; i <= 20; i += 2) {
+            const wave = Math.sin(time * 10 + i * 0.2) * 4;
+            if (i === -20) ctx.moveTo(cx + i, my + wave);
+            else ctx.lineTo(cx + i, my + wave);
+        }
+        ctx.stroke();
         break;
 
       case ESTADOS.PENSANDO:
-        // Wavy / skeptical
-        for (let i = -3; i <= 3; i++) {
-          const wave = Math.round(Math.sin(i * 1.5) * 0.6);
-          this._px(cx + i, my + wave, COLORS.yellow);
+        // Loading dots/pulse
+        for (let i = -1; i <= 1; i++) {
+            const alpha = 0.3 + Math.abs(Math.sin(time * 4 + i)) * 0.7;
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.arc(cx + i * 12, my, 3, 0, Math.PI * 2);
+            ctx.fill();
         }
+        ctx.globalAlpha = 1;
+        break;
+
+      case ESTADOS.EXECUTANDO:
+        // Core em sobrecarga de processamento
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2 + time * 10;
+            const r = 10 + Math.sin(time * 20) * 5;
+            const px = cx + Math.cos(angle) * r;
+            const py = my + Math.sin(angle) * r * 0.5;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
         break;
 
       case ESTADOS.FALANDO: {
-        // Animated open/close: 0=closed, 1=half, 2=open, 3=half
-        const openings = [1, 2, 3, 2];
-        const mh = openings[this.mouthFrame];
-        this._rect(cx - 3, my, 7, 1, COLORS.white);
-        if (mh >= 2) this._rect(cx - 2, my + 1, 5, 1, COLORS.white);
-        if (mh >= 3) this._rect(cx - 1, my + 2, 3, 1, COLORS.white);
-        // Inner mouth darkness
-        if (mh >= 2) this._rect(cx - 1, my + 1, 3, Math.min(mh - 1, 2), COLORS.face);
+        // Dynamic Speech Aperture
+        const volume = 5 + Math.abs(Math.sin(time * 15)) * 10;
+        ctx.beginPath();
+        ctx.ellipse(cx, my, 15, volume, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = COLORS.face;
+        ctx.fill();
         break;
       }
 
-      case ESTADOS.EXECUTANDO:
-        // Concentrated straight line
-        this._rect(cx - 3, my, 7, 1, COLORS.orange);
-        break;
-
-      case ESTADOS.ERRO:
-        // Frown
-        this._rect(cx - 3, my + 1, 7, 1, COLORS.red);
-        this._px(cx - 4, my, COLORS.red);
-        this._px(cx + 4, my, COLORS.red);
-        break;
-
       case ESTADOS.SUCESSO:
-        // Big smile
-        this._rect(cx - 4, my, 9, 1, COLORS.primary);
-        this._px(cx - 5, my - 1, COLORS.primary);
-        this._px(cx + 5, my - 1, COLORS.primary);
-        this._px(cx - 5, my - 2, COLORS.primary);
-        this._px(cx + 5, my - 2, COLORS.primary);
+        ctx.beginPath();
+        ctx.moveTo(cx - 18, my - 5);
+        ctx.bezierCurveTo(cx - 10, my + 10, cx + 10, my + 10, cx + 18, my - 5);
+        ctx.stroke();
+        break;
+        
+      case ESTADOS.ERRO:
+        ctx.beginPath();
+        ctx.moveTo(cx - 15, my + 5);
+        ctx.bezierCurveTo(cx - 5, my - 5, cx + 5, my - 5, cx + 15, my + 5);
+        ctx.stroke();
         break;
     }
+    ctx.shadowBlur = 0;
   }
 
   /* ---- Effects ---- */

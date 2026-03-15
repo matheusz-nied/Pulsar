@@ -190,14 +190,21 @@ class PulsarApp {
         break;
       case 'resposta_chunk':
         this.robot.onProcessing();
-        if (data.texto) this._appendAssistantChunk(data.texto);
+        if (data.texto) {
+          this._removeTypingIndicator();
+          this._appendAssistantChunk(data.texto);
+        }
         break;
       case 'audio_ready':
+        this._finalizeStreamingMessage();
+        this.robot.onSuccess();
+        this.isProcessing = false;
         if (data.url) this._playAudio(data.url);
         break;
       case 'erro':
         this.robot.onError();
         this.isProcessing = false;
+        this._finalizeStreamingMessage();
         this._removeTypingIndicator();
         this._addMessage('assistant', `Erro: ${data.mensagem || 'Erro desconhecido'}`);
         break;
@@ -270,8 +277,7 @@ class PulsarApp {
         this.robot.onUserSpeaking();
         if (data.texto) {
           this._addMessage('user', data.texto);
-          // Muda para chat para o usuário ver a conversa
-          this.switchView('chat');
+          // Permanece no modo robô - não muda para chat
         }
         this.robot.onProcessing();
         // Prepara div de streaming para a resposta
@@ -280,12 +286,14 @@ class PulsarApp {
 
       case 'resposta_chunk':
         // Acumula resposta do agente em streaming
+        this.robot.onProcessing();
         if (data.texto) this._appendVoiceChunk(data.texto);
         break;
 
       case 'audio_ready':
         // Finaliza streaming e reproduz áudio
         this._finalizeVoiceStream();
+        this.robot.onSuccess();
         if (data.url) this._playAudio(data.url);
         break;
 
@@ -507,6 +515,17 @@ class PulsarApp {
 
     this.chatMessages.appendChild(div);
     this._scrollToBottom();
+  }
+
+  _finalizeStreamingMessage() {
+    const streamingMsg = this.chatMessages.querySelector('.message.assistant.streaming');
+    if (streamingMsg) {
+      streamingMsg.classList.remove('streaming');
+      const text = streamingMsg.querySelector('.msg-text').textContent;
+      const timeStr = streamingMsg.querySelector('.msg-time').textContent;
+      this.messages.push({ role: 'assistant', text, time: timeStr, timestamp: new Date().toISOString() });
+      this._saveHistory();
+    }
   }
 
   _showTypingIndicator() {

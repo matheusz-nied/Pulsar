@@ -182,12 +182,12 @@ class WhisperSTT:
         
         try:
             # Transcreve com language="pt" para forçar português
+            # VAD filter desativado temporariamente para testar
             segments, info = self.model.transcribe(
                 audio_path,
                 language="pt",
                 beam_size=5,
-                vad_filter=True,  # Voice Activity Detection para melhor performance
-                vad_parameters=dict(min_silence_duration_ms=500)
+                vad_filter=False  # Desativado para evitar filtrar voz legítima
             )
             
             logger.debug(

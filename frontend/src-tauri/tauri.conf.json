@@ -12,13 +12,13 @@
       {
         "title": "Pulsar",
         "label": "main",
-        "width": 420,
+        "width": 680,
         "height": 680,
-        "minWidth": 420,
-        "minHeight": 680,
+        "minWidth": 60,
+        "minHeight": 60,
         "alwaysOnTop": true,
         "decorations": false,
-        "resizable": false,
+        "resizable": true,
         "transparent": true
       }
     ],
