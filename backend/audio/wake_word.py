@@ -340,16 +340,16 @@ class WakeWordListener:
                         continue
 
                     pcm = frame.flatten().astype(np.int16)
-                    result = porcupine.process(pcm)
+                    result = porcupine.process(pcm) # type: ignore
 
                     if result >= 0:
                         logger.success("Wake word 'Pulsar' detectada!")
                         # Notifica frontend
-                        broadcast_sync({"type": "wake_word"}, self._loop)
+                        broadcast_sync({"type": "wake_word"}, self._loop) # type: ignore
                         # Roda pipeline de voz no event loop asyncio
                         asyncio.run_coroutine_threadsafe(
-                            _run_voice_pipeline(self._session_id, self._loop),
-                            self._loop,
+                            _run_voice_pipeline(self._session_id, self._loop), # type: ignore
+                            self._loop, # type: ignore
                         )
                         # Limpa fila para descartar áudio acumulado durante o pipeline
                         with audio_queue.mutex:

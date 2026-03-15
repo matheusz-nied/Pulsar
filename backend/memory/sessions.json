@@ -837,6 +837,54 @@
     {
       "role": "assistant",
       "content": "Tocando \"Trilogy in Blois\"."
+    },
+    {
+      "role": "user",
+      "content": "Quais tuos você tem disponível para usar?"
+    },
+    {
+      "role": "assistant",
+      "content": "Posso buscar na web, notícias, abrir/fechar apps, definir alarmes e controlar música."
+    }
+  ],
+  "62ef9a10-51fc-476e-bc7f-44064df714be": [
+    {
+      "role": "user",
+      "content": "É muito bom. É muito bom. É muito bom."
+    },
+    {
+      "role": "assistant",
+      "content": "Sim, é muito bom mesmo."
+    }
+  ],
+  "570ae36e-057a-4af6-97f2-1704215a8e97": [
+    {
+      "role": "user",
+      "content": "Você está bem?"
+    },
+    {
+      "role": "assistant",
+      "content": "Estou funcionando normalmente e pronto para ajudar."
+    }
+  ],
+  "4b4b2a15-d07f-451f-a7b2-aca0f7f2016a": [
+    {
+      "role": "user",
+      "content": "Toque uma música para mim."
+    },
+    {
+      "role": "assistant",
+      "content": "Tocando música relaxante para você."
+    }
+  ],
+  "94fcb546-e477-441b-aea3-2f6bbe8be095": [
+    {
+      "role": "user",
+      "content": "Abra o grugo crome."
+    },
+    {
+      "role": "assistant",
+      "content": "Google Chrome aberto com sucesso."
     }
   ]
 }

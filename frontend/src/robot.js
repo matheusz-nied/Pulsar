@@ -91,9 +91,147 @@ class RobotAnimator {
     this.sleepZs = [];
     this.sleepZTimer = 0;
 
+    // Sistema de sons de thinking
+    this._audioCtx = null;
+    this._thinkingOsc = null;
+    this._thinkingGain = null;
+    this._thinkingInterval = null;
+    this._thinkingSounds = [];
+
     this._running = true;
     this._raf = requestAnimationFrame((ts) => this._loop(ts));
   }
+
+  /* ---- Audio System for Thinking Sounds ---- */
+/* ---- Audio System — Robotic Thinking Sounds ---- */
+
+_initAudio() {
+  if (this._audioCtx) return;
+  this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  this._masterGain = this._audioCtx.createGain();
+  this._masterGain.gain.value = 0.6;
+  this._masterGain.connect(this._audioCtx.destination);
+}
+
+_startThinkingSound() {
+  this._initAudio();
+  if (this._thinkingInterval) return;
+
+  this._thinkingTick();
+  this._thinkingInterval = setInterval(() => {
+    if (this.estado !== ESTADOS.PENSANDO && this.estado !== ESTADOS.EXECUTANDO) {
+      this._stopThinkingSound();
+      return;
+    }
+    this._thinkingTick();
+  }, 180 + Math.random() * 280);
+}
+
+_stopThinkingSound() {
+  if (this._thinkingInterval) {
+    clearInterval(this._thinkingInterval);
+    this._thinkingInterval = null;
+  }
+}
+
+_thinkingTick() {
+  const t = Math.random();
+  if      (t < 0.25) this._playSweep();
+  else if (t < 0.50) this._playDataBurst();
+  else if (t < 0.70) this._playTone([523,659,784,1046,1318][Math.floor(Math.random()*5)], 'sine', 0.08 + Math.random()*0.08, 0.12);
+  else if (t < 0.85) this._playTone(200 + Math.random()*120, 'triangle', 0.12, 0.1);
+  else               this._playGlitch();
+}
+
+// Tom simples com envelope rápido
+_playTone(freq, type, duration, gainPeak, filterFreq = null) {
+  const ctx = this._audioCtx;
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  if (filterFreq) {
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = filterFreq;
+    filter.Q.value = 2.5;
+    osc.connect(filter);
+    filter.connect(gain);
+  } else {
+    osc.connect(gain);
+  }
+  gain.connect(this._masterGain);
+
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, ctx.currentTime);
+
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(gainPeak, ctx.currentTime + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + duration + 0.01);
+}
+
+// Varredura ascendente ou descendente — sensação de scan/análise
+_playSweep() {
+  const ctx  = this._audioCtx;
+  const osc  = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(this._masterGain);
+
+  osc.type = 'sawtooth';
+  const up = Math.random() > 0.5;
+  osc.frequency.setValueAtTime(up ? 300 : 2400, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(up ? 2400 : 300, ctx.currentTime + 0.18);
+
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.2);
+}
+
+// Rajada de notas rápidas — sensação de processamento de dados
+_playDataBurst() {
+  const steps = 5 + Math.floor(Math.random() * 5);
+  const freqs = [440, 523, 659, 784, 1047, 1319];
+  for (let i = 0; i < steps; i++) {
+    setTimeout(() => {
+      const f = freqs[Math.floor(Math.random() * freqs.length)];
+      this._playTone(f, 'square', 0.04, 0.12, f * 1.5);
+    }, i * (18 + Math.random() * 22));
+  }
+}
+
+// Ruído filtrado curto — glitch / falha de leitura
+_playGlitch() {
+  const ctx    = this._audioCtx;
+  const len    = Math.floor(ctx.sampleRate * 0.12);
+  const buf    = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data   = buf.getChannelData(0);
+
+  for (let i = 0; i < len; i++) {
+    const env = i < len * 0.1
+      ? i / (len * 0.1)
+      : Math.exp(-(i - len * 0.1) / (len * 0.3));
+    data[i] = (Math.random() * 2 - 1) * env;
+  }
+
+  const src    = ctx.createBufferSource();
+  const gain   = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 800;
+
+  src.buffer = buf;
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(this._masterGain);
+  gain.gain.value = 0.35;
+  src.start();
+}
 
   /* ---- Public API ---- */
 
@@ -158,16 +296,28 @@ class RobotAnimator {
     switch (state) {
       case ESTADOS.DORMINDO:
         this.targetEyeOpenness = 0;
+        this._stopThinkingSound();
         break;
       case ESTADOS.ACORDANDO:
         this.eyeOpenness = 0;
         this.targetEyeOpenness = 1;
         break;
+      case ESTADOS.PENSANDO:
+      case ESTADOS.EXECUTANDO:
+        this._startThinkingSound();
+        break;
       case ESTADOS.SUCESSO:
+        this._stopThinkingSound();
         this._spawnStars(12);
         break;
       case ESTADOS.ERRO:
+        this._stopThinkingSound();
         this.shakeX = 8;
+        break;
+      case ESTADOS.OCIOSO:
+      case ESTADOS.FALANDO:
+        this._stopThinkingSound();
+        this.targetEyeOpenness = 1;
         break;
       default:
         this.targetEyeOpenness = 1;
