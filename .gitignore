@@ -47,3 +47,5 @@ logs/*.zip
 frontend/node_modules/
 frontend/src-tauri/target/
 frontend/src-tauri/gen/
+pyrightconfig.json
+pyrightconfig.json

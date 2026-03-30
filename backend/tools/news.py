@@ -16,21 +16,23 @@ from datetime import datetime
 from typing import Any, cast
 
 import feedparser
-import httpx
 from loguru import logger
 
+from backend.core.http_client import get_shared_http_client
 from backend.core.logging_config import log_api_call
-
 
 # ============================================================================
 # INTERFACE BASE: NewsProvider
 # ============================================================================
 
+
 class NewsProvider(ABC):
     """Interface abstrata para providers de notícias."""
 
     @abstractmethod
-    async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
+    async def buscar(
+        self, query: str, categoria: str, max_resultados: int
+    ) -> list[dict[str, Any]]:
         """
         Retorna lista de notícias padronizadas.
 
@@ -48,6 +50,7 @@ class NewsProvider(ABC):
 # ============================================================================
 # IMPLEMENTAÇÃO: NewsApiProvider
 # ============================================================================
+
 
 class NewsApiProvider(NewsProvider):
     """Provider de notícias usando NewsAPI (https://newsapi.org)."""
@@ -70,7 +73,9 @@ class NewsApiProvider(NewsProvider):
         self.base_url = "https://newsapi.org/v2/everything"
 
     @log_api_call
-    async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
+    async def buscar(
+        self, query: str, categoria: str, max_resultados: int
+    ) -> list[dict[str, Any]]:
         """Busca notícias via NewsAPI."""
         try:
             # Mapear categorias do agente para categorias internas
@@ -98,33 +103,46 @@ class NewsApiProvider(NewsProvider):
                 # Sem fontes e sem query, busca genérica por tecnologia
                 params["q"] = categoria
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(self.base_url, params=params)
+            client = await get_shared_http_client("newsapi-search", timeout=10.0)
+            response = await client.get(
+                self.base_url,
+                params=params,
+                timeout=10.0,
+            )
 
-                # Fallback: se fonte não disponível no plano gratuito, busca por keyword
-                if response.status_code == 426 or (
-                    response.status_code == 200
-                    and response.json().get("status") == "error"
-                ):
-                    logger.warning("NewsAPI: fontes indisponíveis no plano gratuito, buscando por keyword")
-                    params.pop("sources", None)
-                    params["q"] = query or categoria
-                    response = await client.get(self.base_url, params=params)
+            # Fallback: se fonte não disponível no plano gratuito, busca por keyword
+            if response.status_code == 426 or (
+                response.status_code == 200 and response.json().get("status") == "error"
+            ):
+                logger.warning(
+                    "NewsAPI: fontes indisponíveis no plano gratuito, buscando por keyword"
+                )
+                params.pop("sources", None)
+                params["q"] = query or categoria
+                response = await client.get(
+                    self.base_url,
+                    params=params,
+                    timeout=10.0,
+                )
 
-                response.raise_for_status()
-                data = response.json()
+            response.raise_for_status()
+            data = response.json()
 
             resultados: list[dict[str, Any]] = []
             for article in data.get("articles", []):
-                resultados.append({
-                    "title": article.get("title", ""),
-                    "description": article.get("description", ""),
-                    "url": article.get("url", ""),
-                    "source": article.get("source", {}).get("name", ""),
-                    "published_at": article.get("publishedAt", ""),
-                })
+                resultados.append(
+                    {
+                        "title": article.get("title", ""),
+                        "description": article.get("description", ""),
+                        "url": article.get("url", ""),
+                        "source": article.get("source", {}).get("name", ""),
+                        "published_at": article.get("publishedAt", ""),
+                    }
+                )
 
-            logger.info(f"NewsAPI: {len(resultados)} resultados para categoria='{categoria}', query='{query}'")
+            logger.info(
+                f"NewsAPI: {len(resultados)} resultados para categoria='{categoria}', query='{query}'"
+            )
             return resultados
 
         except Exception as e:
@@ -136,6 +154,7 @@ class NewsApiProvider(NewsProvider):
 # IMPLEMENTAÇÃO: RSSProvider (Fontes Brasileiras)
 # ============================================================================
 
+
 class RSSProvider(NewsProvider):
     """Provider de notícias via RSS feeds (sem necessidade de chave de API)."""
 
@@ -146,23 +165,31 @@ class RSSProvider(NewsProvider):
     }
 
     @log_api_call
-    async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
+    async def buscar(
+        self, query: str, categoria: str, max_resultados: int
+    ) -> list[dict[str, Any]]:
         """Busca notícias via RSS feeds brasileiros."""
         try:
             feed_url = self.FEEDS_BR.get(categoria)
             if not feed_url:
                 # Se categoria não mapeada, tenta tech_br como fallback
                 feed_url = self.FEEDS_BR.get("tech_br", "")
-                logger.info(f"RSS: categoria '{categoria}' não mapeada, usando tech_br como fallback")
+                logger.info(
+                    f"RSS: categoria '{categoria}' não mapeada, usando tech_br como fallback"
+                )
 
             if not feed_url:
                 return []
 
             # feedparser é síncrono, mas rápido o suficiente para RSS
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(feed_url, follow_redirects=True)
-                response.raise_for_status()
-                content = response.text
+            client = await get_shared_http_client("rss-search", timeout=15.0)
+            response = await client.get(
+                feed_url,
+                follow_redirects=True,
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            content = response.text
 
             feed = feedparser.parse(content)
             feed_meta = cast(dict[str, Any], feed.feed)
@@ -170,7 +197,9 @@ class RSSProvider(NewsProvider):
             resultados: list[dict[str, Any]] = []
             for entry in feed.entries[:max_resultados]:
                 entry_data = cast(dict[str, Any], entry)
-                published_raw = entry_data.get("published", entry_data.get("updated", ""))
+                published_raw = entry_data.get(
+                    "published", entry_data.get("updated", "")
+                )
                 published = str(published_raw) if published_raw is not None else ""
                 # Tentar formatar a data se possível
                 published_parsed = entry_data.get("published_parsed")
@@ -187,35 +216,46 @@ class RSSProvider(NewsProvider):
                     except Exception:
                         pass
 
-                description_raw = entry_data.get("summary", entry_data.get("description", ""))
-                description = str(description_raw) if description_raw is not None else ""
+                description_raw = entry_data.get(
+                    "summary", entry_data.get("description", "")
+                )
+                description = (
+                    str(description_raw) if description_raw is not None else ""
+                )
                 # Limpar HTML básico do description
                 if "<" in description:
-                    from html import unescape
                     import re
+                    from html import unescape
+
                     description = re.sub(r"<[^>]+>", "", unescape(description))
                 description = description[:300]
 
                 source_raw = feed_meta.get("title", "RSS")
                 source = str(source_raw) if source_raw is not None else "RSS"
 
-                resultados.append({
-                    "title": str(entry_data.get("title", "")),
-                    "description": description,
-                    "url": str(entry_data.get("link", "")),
-                    "source": source,
-                    "published_at": published,
-                })
+                resultados.append(
+                    {
+                        "title": str(entry_data.get("title", "")),
+                        "description": description,
+                        "url": str(entry_data.get("link", "")),
+                        "source": source,
+                        "published_at": published,
+                    }
+                )
 
             # Filtrar por query se fornecida
             if query:
                 query_lower = query.lower()
                 resultados = [
-                    r for r in resultados
-                    if query_lower in r["title"].lower() or query_lower in r["description"].lower()
+                    r
+                    for r in resultados
+                    if query_lower in r["title"].lower()
+                    or query_lower in r["description"].lower()
                 ]
 
-            logger.info(f"RSS: {len(resultados)} resultados para categoria='{categoria}', query='{query}'")
+            logger.info(
+                f"RSS: {len(resultados)} resultados para categoria='{categoria}', query='{query}'"
+            )
             return resultados
 
         except Exception as e:
@@ -226,6 +266,7 @@ class RSSProvider(NewsProvider):
 # ============================================================================
 # IMPLEMENTAÇÃO: AlphaVantageProvider (Finanças com Sentiment)
 # ============================================================================
+
 
 class AlphaVantageProvider(NewsProvider):
     """Provider de notícias financeiras com análise de sentimento via Alpha Vantage."""
@@ -241,7 +282,9 @@ class AlphaVantageProvider(NewsProvider):
         self.base_url = "https://www.alphavantage.co/query"
 
     @log_api_call
-    async def buscar(self, query: str, categoria: str, max_resultados: int) -> list[dict[str, Any]]:
+    async def buscar(
+        self, query: str, categoria: str, max_resultados: int
+    ) -> list[dict[str, Any]]:
         """Busca notícias financeiras com sentiment via Alpha Vantage."""
         try:
             params: dict[str, Any] = {
@@ -254,10 +297,17 @@ class AlphaVantageProvider(NewsProvider):
             if query:
                 params["tickers"] = query
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(self.base_url, params=params)
-                response.raise_for_status()
-                data = response.json()
+            client = await get_shared_http_client(
+                "alphavantage-search",
+                timeout=10.0,
+            )
+            response = await client.get(
+                self.base_url,
+                params=params,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
 
             resultados: list[dict[str, Any]] = []
             for item in data.get("feed", [])[:max_resultados]:
@@ -270,17 +320,21 @@ class AlphaVantageProvider(NewsProvider):
                 else:
                     sentiment_label = "Neutral"
 
-                resultados.append({
-                    "title": item.get("title", ""),
-                    "description": item.get("summary", "")[:300],
-                    "url": item.get("url", ""),
-                    "source": item.get("source", ""),
-                    "published_at": item.get("time_published", ""),
-                    "sentiment_score": score,
-                    "sentiment_label": sentiment_label,
-                })
+                resultados.append(
+                    {
+                        "title": item.get("title", ""),
+                        "description": item.get("summary", "")[:300],
+                        "url": item.get("url", ""),
+                        "source": item.get("source", ""),
+                        "published_at": item.get("time_published", ""),
+                        "sentiment_score": score,
+                        "sentiment_label": sentiment_label,
+                    }
+                )
 
-            logger.info(f"AlphaVantage: {len(resultados)} resultados para query='{query}'")
+            logger.info(
+                f"AlphaVantage: {len(resultados)} resultados para query='{query}'"
+            )
             return resultados
 
         except Exception as e:
@@ -291,6 +345,7 @@ class AlphaVantageProvider(NewsProvider):
 # ============================================================================
 # SERVIÇO DE NOTÍCIAS COM ROTEAMENTO POR CATEGORIA
 # ============================================================================
+
 
 class NewsService:
     """
@@ -338,14 +393,20 @@ class NewsService:
         try:
             if categoria in ["ia", "tech", "software"]:
                 if "newsapi" in self.providers:
-                    resultados = await self.providers["newsapi"].buscar(query, categoria, max_resultados)
+                    resultados = await self.providers["newsapi"].buscar(
+                        query, categoria, max_resultados
+                    )
 
             elif categoria == "financas":
                 # Prefere Alpha Vantage se disponível (tem sentiment)
                 if "alphavantage" in self.providers:
-                    resultados = await self.providers["alphavantage"].buscar(query, categoria, max_resultados)
+                    resultados = await self.providers["alphavantage"].buscar(
+                        query, categoria, max_resultados
+                    )
                 elif "newsapi" in self.providers:
-                    resultados = await self.providers["newsapi"].buscar(query, categoria, max_resultados)
+                    resultados = await self.providers["newsapi"].buscar(
+                        query, categoria, max_resultados
+                    )
 
             elif categoria == "economia":
                 # Mescla NewsAPI + RSS
@@ -355,18 +416,24 @@ class NewsService:
                     )
                     resultados.extend(news_api_results)
 
-                rss_results = await self.providers["rss"].buscar(query, "economia_br", max_resultados // 2)
+                rss_results = await self.providers["rss"].buscar(
+                    query, "economia_br", max_resultados // 2
+                )
                 resultados.extend(rss_results)
 
             elif categoria == "brasil":
                 # Apenas RSS (fontes brasileiras)
-                resultados = await self.providers["rss"].buscar(query, "tech_br", max_resultados)
+                resultados = await self.providers["rss"].buscar(
+                    query, "tech_br", max_resultados
+                )
 
             else:  # "geral"
                 # Tenta qualquer provider disponível
                 for provider_name, provider in self.providers.items():
                     try:
-                        results = await provider.buscar(query, categoria, max_resultados)
+                        results = await provider.buscar(
+                            query, categoria, max_resultados
+                        )
                         if results:
                             resultados = results
                             break

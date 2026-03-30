@@ -6,6 +6,7 @@ import inspect
 import json
 import sys
 import time
+from contextvars import ContextVar, Token
 from functools import wraps
 from pathlib import Path
 from typing import Any, Awaitable, Callable, TypeVar, cast
@@ -13,7 +14,6 @@ from typing import Any, Awaitable, Callable, TypeVar, cast
 from loguru import logger
 
 from backend.memory.database import db
-
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -33,6 +33,11 @@ _SENSITIVE_KEYS = {
     "cookie",
     "chave",
 }
+
+_REQUEST_METRICS: ContextVar[dict[str, float] | None] = ContextVar(
+    "pulsar_request_metrics",
+    default=None,
+)
 
 
 def setup_logging() -> None:
@@ -110,6 +115,40 @@ def _safe_json(data: Any) -> str:
         return str(data)
 
 
+def start_request_metrics() -> Token[dict[str, float] | None]:
+    """Inicia a coleta de métricas no contexto assíncrono atual."""
+    return _REQUEST_METRICS.set({})
+
+
+def finish_request_metrics(token: Token[dict[str, float] | None]) -> None:
+    """Encerra a coleta de métricas do contexto atual."""
+    _REQUEST_METRICS.reset(token)
+
+
+def add_request_metric(name: str, value: float) -> None:
+    """Acumula uma métrica numérica no contexto atual."""
+    metrics = _REQUEST_METRICS.get()
+    if metrics is None:
+        return
+    metrics[name] = metrics.get(name, 0.0) + value
+
+
+def set_request_metric(name: str, value: float) -> None:
+    """Define o valor absoluto de uma métrica no contexto atual."""
+    metrics = _REQUEST_METRICS.get()
+    if metrics is None:
+        return
+    metrics[name] = value
+
+
+def get_request_metrics() -> dict[str, float]:
+    """Retorna um snapshot das métricas acumuladas no contexto atual."""
+    metrics = _REQUEST_METRICS.get()
+    if metrics is None:
+        return {}
+    return dict(metrics)
+
+
 def log_tool_call(func: F) -> F:
     """Decorator para logar chamada de tools e registrar ação no SQLite."""
 
@@ -138,6 +177,7 @@ def log_tool_call(func: F) -> F:
                 _safe_json(sanitized_result),
                 elapsed_ms,
             )
+            add_request_metric("tools_ms", elapsed_ms)
 
             try:
                 await db.registrar_acao(
@@ -179,6 +219,7 @@ def log_tool_call(func: F) -> F:
         try:
             result = func(*args, **kwargs)
             elapsed_ms = (time.perf_counter() - started_at) * 1000
+            add_request_metric("tools_ms", elapsed_ms)
             logger.info(
                 "Tool call finalizada: {} | resultado={} | tempo_ms={:.2f}",
                 tool_name,
@@ -221,6 +262,7 @@ def log_api_call(func: F) -> F:
                 tokens,
                 elapsed_ms,
             )
+            add_request_metric("api_ms", elapsed_ms)
             return result
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - started_at) * 1000
@@ -246,6 +288,7 @@ def log_api_call(func: F) -> F:
                 _extract_tokens(result),
                 elapsed_ms,
             )
+            add_request_metric("api_ms", elapsed_ms)
             return result
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - started_at) * 1000

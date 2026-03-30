@@ -15,7 +15,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-import httpx
 from dotenv import load_dotenv
 from loguru import logger
 from telegram import Bot, Message, Update
@@ -28,6 +27,7 @@ from telegram.ext import (
     filters,
 )
 
+from backend.core.http_client import close_shared_http_clients, get_shared_http_client
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -47,19 +47,19 @@ def _bot_token() -> str:
 async def _backend_get(endpoint: str) -> dict[str, Any]:
     """Executa um GET no backend e retorna JSON."""
     url = f"{BACKEND_BASE_URL}{endpoint}"
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.json()
+    client = await get_shared_http_client("telegram-backend-get", timeout=20.0)
+    response = await client.get(url, timeout=20.0)
+    response.raise_for_status()
+    return response.json()
 
 
 async def _backend_post(endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Executa um POST no backend e retorna JSON."""
     url = f"{BACKEND_BASE_URL}{endpoint}"
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        return response.json()
+    client = await get_shared_http_client("telegram-backend-post", timeout=60.0)
+    response = await client.post(url, json=payload, timeout=60.0)
+    response.raise_for_status()
+    return response.json()
 
 
 async def send_notification(mensagem: str) -> bool:
@@ -75,7 +75,9 @@ async def send_notification(mensagem: str) -> bool:
     if not owner_chat_id:
         owner_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not owner_chat_id:
-        logger.warning("TELEGRAM_OWNER_ID/TELEGRAM_CHAT_ID não configurado; notificação ignorada.")
+        logger.warning(
+            "TELEGRAM_OWNER_ID/TELEGRAM_CHAT_ID não configurado; notificação ignorada."
+        )
         return False
 
     try:
@@ -120,7 +122,9 @@ async def _handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("\n".join(linhas))
     except Exception as exc:
         logger.error("Falha no /status: {}", exc)
-        await update.message.reply_text("Não foi possível consultar /health no backend.")
+        await update.message.reply_text(
+            "Não foi possível consultar /health no backend."
+        )
 
 
 async def _handle_alarmes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -139,11 +143,14 @@ async def _handle_alarmes(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         for alarme in alarmes:
             linhas.append(
                 f"- ID: {alarme.get('id', '-')}, Horário: {alarme.get('horario', '-')}, "
-                f"Mensagem: {alarme.get('mensagem', '-')}")
+                f"Mensagem: {alarme.get('mensagem', '-')}"
+            )
         await update.message.reply_text("\n".join(linhas))
     except Exception as exc:
         logger.error("Falha no /alarmes: {}", exc)
-        await update.message.reply_text("Não foi possível consultar os alarmes no backend.")
+        await update.message.reply_text(
+            "Não foi possível consultar os alarmes no backend."
+        )
 
 
 async def _handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,7 +163,7 @@ async def _handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Envie uma mensagem de texto para conversar.")
         return
 
-    session_id = f"telegram-{update.effective_chat.id}" # type: ignore
+    session_id = f"telegram-{update.effective_chat.id}"  # type: ignore
 
     try:
         await update.message.chat.send_action(ChatAction.TYPING)
@@ -207,7 +214,7 @@ async def _handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     temp_path: str | None = None
-    session_id = f"telegram-{update.effective_chat.id}" # type: ignore
+    session_id = f"telegram-{update.effective_chat.id}"  # type: ignore
 
     try:
         temp_path, original_name = await _download_media_to_temp(update.message)
@@ -218,16 +225,26 @@ async def _handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.chat.send_action(ChatAction.TYPING)
 
         with open(temp_path, "rb") as file_obj:
-            files = {"audio": (original_name or "audio.bin", file_obj, "application/octet-stream")}
-            form_data = {"session_id": session_id}
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                response = await client.post(
-                    f"{BACKEND_BASE_URL}/voice",
-                    files=files,
-                    data=form_data,
+            files = {
+                "audio": (
+                    original_name or "audio.bin",
+                    file_obj,
+                    "application/octet-stream",
                 )
-                response.raise_for_status()
-                data = response.json()
+            }
+            form_data = {"session_id": session_id}
+            client = await get_shared_http_client(
+                "telegram-backend-upload",
+                timeout=180.0,
+            )
+            response = await client.post(
+                f"{BACKEND_BASE_URL}/voice",
+                files=files,
+                data=form_data,
+                timeout=180.0,
+            )
+            response.raise_for_status()
+            data = response.json()
 
         resposta = data.get("resposta", "Sem resposta do assistente.")
         transcricao = data.get("transcricao", "")
@@ -252,9 +269,13 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("start", _handle_start))
     application.add_handler(CommandHandler("status", _handle_status))
     application.add_handler(CommandHandler("alarmes", _handle_alarmes))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_text))
     application.add_handler(
-        MessageHandler(filters.VOICE | filters.AUDIO | filters.Document.ALL, _handle_media)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_text)
+    )
+    application.add_handler(
+        MessageHandler(
+            filters.VOICE | filters.AUDIO | filters.Document.ALL, _handle_media
+        )
     )
 
     return application
@@ -271,14 +292,15 @@ async def start_bot() -> None:
     logger.info("Bot do Telegram iniciando em polling")
     await application.initialize()
     await application.start()
-    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES) # type: ignore
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)  # type: ignore
 
     try:
         await asyncio.Event().wait()
     finally:
-        await application.updater.stop() # type: ignore
+        await application.updater.stop()  # type: ignore
         await application.stop()
         await application.shutdown()
+        await close_shared_http_clients()
 
 
 if __name__ == "__main__":

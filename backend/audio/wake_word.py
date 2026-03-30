@@ -19,6 +19,7 @@ import queue
 import threading
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -27,24 +28,31 @@ import sounddevice as sd
 import soundfile as sf
 from loguru import logger
 
+from backend.core.logging_config import (
+    finish_request_metrics,
+    get_request_metrics,
+    set_request_metric,
+    start_request_metrics,
+)
+
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
 
 # ── Configurações ──────────────────────────────────────────────────────────────
 
-SAMPLE_RATE = 16000          # Hz — exigido pelo Porcupine e pelo Whisper
-FRAME_LENGTH = 512           # amostras por frame do Porcupine
-RECORD_SAMPLE_RATE = 16000   # Hz para gravação pós-wake-word
+SAMPLE_RATE = 16000  # Hz — exigido pelo Porcupine e pelo Whisper
+FRAME_LENGTH = 512  # amostras por frame do Porcupine
+RECORD_SAMPLE_RATE = 16000  # Hz para gravação pós-wake-word
 CHANNELS = 1
 
 # Detecção de silêncio após wake word
-SILENCE_THRESHOLD = 0.010    # RMS abaixo disso = silêncio (mais permissivo)
-SILENCE_DURATION = 1.0       # segundos contínuos de silêncio para encerrar (aumentado)
-MIN_SPEECH_DURATION = 0.8    # espera mínima antes de checar silêncio (aumentado)
-MAX_RECORD_DURATION = 20.0   # segundos máximos de gravação
+SILENCE_THRESHOLD = 0.010  # RMS abaixo disso = silêncio (mais permissivo)
+SILENCE_DURATION = 1.0  # segundos contínuos de silêncio para encerrar (aumentado)
+MIN_SPEECH_DURATION = 0.8  # espera mínima antes de checar silêncio (aumentado)
+MAX_RECORD_DURATION = 20.0  # segundos máximos de gravação
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-PPN_PATH  = _PROJECT_ROOT / "Pulsar_pt_linux_v4_0_0" / "Pulsar_pt_linux_v4_0_0.ppn"
+PPN_PATH = _PROJECT_ROOT / "Pulsar_pt_linux_v4_0_0" / "Pulsar_pt_linux_v4_0_0.ppn"
 MODEL_PATH = _PROJECT_ROOT / "Pulsar_pt_linux_v4_0_0" / "porcupine_params_pt.pv"
 
 # ── Gerenciador de conexões WebSocket ──────────────────────────────────────────
@@ -84,6 +92,7 @@ def broadcast_sync(event: dict, loop: AbstractEventLoop) -> None:
 
 # ── Gravação pós-wake-word ─────────────────────────────────────────────────────
 
+
 def _record_until_silence() -> np.ndarray | None:
     """
     Grava áudio do microfone até detectar silêncio prolongado ou tempo máximo.
@@ -110,7 +119,7 @@ def _record_until_silence() -> np.ndarray | None:
         if elapsed < MIN_SPEECH_DURATION:
             silence_start = None
             return
-        rms = float(np.sqrt(np.mean(indata ** 2)))
+        rms = float(np.sqrt(np.mean(indata**2)))
         if rms < SILENCE_THRESHOLD:
             if silence_start is None:
                 silence_start = time.time()
@@ -128,7 +137,10 @@ def _record_until_silence() -> np.ndarray | None:
                 break
             # Só encerra por silêncio após fase 1
             if elapsed >= MIN_SPEECH_DURATION:
-                if silence_start is not None and (time.time() - silence_start) >= SILENCE_DURATION:
+                if (
+                    silence_start is not None
+                    and (time.time() - silence_start) >= SILENCE_DURATION
+                ):
                     stop_event.set()
                     break
             time.sleep(0.05)
@@ -155,7 +167,7 @@ def _record_until_silence() -> np.ndarray | None:
 
     audio = np.concatenate(chunks, axis=0).flatten()
     duration = len(audio) / RECORD_SAMPLE_RATE
-    rms_medio = float(np.sqrt(np.mean(audio ** 2)))
+    rms_medio = float(np.sqrt(np.mean(audio**2)))
     logger.info(f"Gravação concluída: {duration:.2f}s (RMS médio: {rms_medio:.4f})")
 
     return audio
@@ -168,38 +180,91 @@ def _save_wav(audio: np.ndarray) -> Path:
     return path
 
 
+def _extrair_frases_tts(
+    buffer: str,
+    min_chars: int = 18,
+) -> tuple[list[str], str]:
+    """
+    Extrai frases já prontas para TTS incremental.
+
+    Args:
+        buffer: Texto acumulado.
+        min_chars: Tamanho mínimo para frases curtas.
+
+    Returns:
+        Tupla com (frases_prontas, restante_do_buffer).
+    """
+    frases: list[str] = []
+    inicio = 0
+    pontuacao_forte = ".!?:"
+    pontuacao_fraca = ";"
+    min_chars_virgula = 72
+
+    for idx, char in enumerate(buffer):
+        if char not in pontuacao_forte and char not in pontuacao_fraca and char != ",":
+            continue
+
+        frase = buffer[inicio : idx + 1].strip()
+        if not frase:
+            inicio = idx + 1
+            continue
+
+        if char == "," and len(frase) < min_chars_virgula:
+            continue
+
+        if char in pontuacao_fraca and len(frase) < min_chars:
+            continue
+
+        if len(frase) < 8:
+            continue
+
+        frases.append(frase)
+        inicio = idx + 1
+
+    restante = buffer[inicio:].lstrip()
+    return frases, restante
+
+
 # ── Pipeline completa pós-wake-word ───────────────────────────────────────────
+
 
 async def _run_voice_pipeline(session_id: str, loop: AbstractEventLoop) -> None:
     """
     Pipeline assíncrona: grava → STT → Agente → TTS → broadcast.
     Executada no event loop principal após wake word detectado.
 
-    Usa agent.processar() (não-streaming) porque processar_stream filtra
-    incorretamente o texto final quando o agente executa tool calls via LangGraph.
     Mantém histórico próprio da sessão de voz separado do chat de texto.
     """
-    from backend.agent.agent import agent
-    from backend.agent.memory import persistent_memory, session_memory, vector_memory
+    from backend.agent.agent import agent, get_loaded_agent
+    from backend.agent.memory import schedule_conversation_persistence, session_memory
     from backend.audio.stt import get_stt
     from backend.audio.tts import get_tts
 
-    # 1. Gravar em thread para não bloquear o event loop
-    logger.info("Iniciando gravação de voz...")
-    audio = await asyncio.get_event_loop().run_in_executor(None, _record_until_silence)
-
-    if audio is None:
-        logger.warning("Nenhum áudio capturado após wake word")
-        await _broadcast({"type": "voice_idle"}, loop)
-        return
-
-    # 2. Salvar WAV temporário
-    wav_path = await asyncio.get_event_loop().run_in_executor(None, _save_wav, audio)
+    token = start_request_metrics()
+    started_at = time.perf_counter()
+    modelo_usado = "erro"
+    wav_path: Path | None = None
 
     try:
+        # 1. Gravar em thread para não bloquear o event loop
+        logger.info("Iniciando gravação de voz...")
+        audio = await asyncio.get_event_loop().run_in_executor(
+            None, _record_until_silence
+        )
+
+        if audio is None:
+            logger.warning("Nenhum áudio capturado após wake word")
+            await _broadcast({"type": "voice_idle"}, loop)
+            return
+
+        # 2. Salvar WAV temporário
+        wav_path = await asyncio.get_event_loop().run_in_executor(
+            None, _save_wav, audio
+        )
+
         # 3. STT
         logger.info(f"Transcrevendo: {wav_path}")
-        stt = get_stt(model_size="base")
+        stt = get_stt(model_size="small")
         transcricao = await stt.transcrever(str(wav_path))
 
         if not transcricao.strip():
@@ -211,53 +276,144 @@ async def _run_voice_pipeline(session_id: str, loop: AbstractEventLoop) -> None:
         logger.info(f"Transcrição: {transcricao}")
         await _broadcast({"type": "transcricao", "texto": transcricao}, loop)
 
-        # 4. Agente — usa processar() que é confiável com tool calls.
-        #    Passa histórico VAZIO para garantir que o Claude chame as tools
-        #    corretamente sem ser influenciado por pares user→assistant anteriores
-        #    (ex: "tocar X" → "Tocando X") que fazem o modelo pular a tool call.
-        #    Cada comando de voz é tratado como comando independente.
-        agent_response = await agent.processar(transcricao, [], session_id=session_id)
-        resposta_completa = agent_response.resposta.strip() if agent_response.resposta else ""
-
-        logger.info(f"Resposta do agente ({agent_response.modelo_usado}): {repr(resposta_completa[:80])}")
-
-        # Emite a resposta completa como chunk único para o frontend exibir
-        if resposta_completa:
-            await _broadcast({"type": "resposta_chunk", "texto": resposta_completa}, loop)
-
-        # 5. Salvar histórico de voz (separado do chat de texto)
-        session_memory.add_message(session_id, "user", transcricao)
-        session_memory.add_message(session_id, "assistant", resposta_completa)
-        persistent_memory.save(session_id, session_memory.get_history(session_id))
-
-        if vector_memory is not None:
-            await vector_memory.salvar_conversa(session_id, transcricao, resposta_completa)
-
-        # 6. TTS — só sintetiza se há resposta
-        if not resposta_completa:
-            logger.warning("Agente retornou resposta vazia, pulando TTS")
-            await _broadcast({"type": "voice_idle"}, loop)
-            return
-
+        # 4. Agente + TTS incremental.
+        resposta_completa = ""
+        frase_buffer = ""
+        audio_chunk_urls: list[str] = []
         tts = get_tts()
-        audio_path = await tts.sintetizar(resposta_completa)
-        audio_filename = Path(audio_path).name
-        await _broadcast({"type": "audio_ready", "url": f"/audio/{audio_filename}"}, loop)
+        phrase_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-        logger.success(f"Pipeline de voz concluída: audio={audio_filename}")
+        async def tts_worker() -> None:
+            while True:
+                frase = await phrase_queue.get()
+                try:
+                    if frase is None:
+                        return
+
+                    audio_path = await tts.sintetizar_frase(frase)
+                    audio_filename = Path(audio_path).name
+                    audio_url = f"/audio/{audio_filename}"
+                    audio_chunk_urls.append(audio_url)
+                    set_request_metric("tts_chunks", float(len(audio_chunk_urls)))
+                    await _broadcast({"type": "audio_chunk", "url": audio_url}, loop)
+                except Exception as exc:
+                    logger.warning(
+                        "Wake word falhou ao sintetizar frase para TTS incremental: {}",
+                        exc,
+                    )
+                finally:
+                    phrase_queue.task_done()
+
+        tts_task = asyncio.create_task(
+            tts_worker(),
+            name=f"pulsar-voice-tts-{session_id}",
+        )
+
+        try:
+            fast_path_response = await agent.try_fast_path(transcricao)  # type: ignore[attr-defined]
+            if fast_path_response is not None:
+                modelo_usado = fast_path_response.modelo_usado
+                resposta_completa = fast_path_response.resposta.strip()
+                if resposta_completa:
+                    await _broadcast(
+                        {"type": "resposta_chunk", "texto": resposta_completa},
+                        loop,
+                    )
+                    frase_buffer += resposta_completa
+                    frases_prontas, frase_buffer = _extrair_frases_tts(frase_buffer)
+                    for frase in frases_prontas:
+                        await phrase_queue.put(frase)
+            else:
+                async for chunk in agent.processar_stream(
+                    transcricao,
+                    [],
+                    session_id=session_id,
+                ):
+                    resposta_completa += chunk
+                    frase_buffer += chunk
+                    await _broadcast({"type": "resposta_chunk", "texto": chunk}, loop)
+                    frases_prontas, frase_buffer = _extrair_frases_tts(frase_buffer)
+                    for frase in frases_prontas:
+                        await phrase_queue.put(frase)
+
+                loaded_agent = get_loaded_agent()
+                modelo_usado = (
+                    loaded_agent.llm.__class__.__name__
+                    if loaded_agent is not None
+                    else "lazy"
+                )
+
+            logger.info(
+                "Resposta do agente ({}): {}",
+                modelo_usado,
+                repr(resposta_completa[:80]),
+            )
+
+            # 5. Salvar histórico de voz (separado do chat de texto)
+            session_memory.add_message(session_id, "user", transcricao)
+            session_memory.add_message(session_id, "assistant", resposta_completa)
+            schedule_conversation_persistence(
+                session_id,
+                session_memory.get_history(session_id),
+                transcricao,
+                resposta_completa,
+            )
+
+            if not resposta_completa:
+                logger.warning("Agente retornou resposta vazia, pulando TTS")
+                await _broadcast({"type": "voice_idle"}, loop)
+                return
+
+            if frase_buffer.strip():
+                await phrase_queue.put(frase_buffer.strip())
+            await phrase_queue.put(None)
+            await phrase_queue.join()
+            await tts_task
+        finally:
+            if not tts_task.done():
+                with suppress(asyncio.QueueFull):
+                    await phrase_queue.put(None)
+                tts_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await tts_task
+        await _broadcast(
+            {
+                "type": "audio_ready",
+                "url": audio_chunk_urls[0] if audio_chunk_urls else "",
+            },
+            loop,
+        )
+
+        logger.success(
+            "Pipeline de voz concluída: audio_chunks={}",
+            len(audio_chunk_urls),
+        )
 
     except Exception as e:
         logger.error(f"Erro na pipeline de voz: {e}")
         logger.exception(e)
         await _broadcast({"type": "erro", "mensagem": str(e)}, loop)
     finally:
+        set_request_metric("total_ms", (time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "Voice pipeline metrics: session_id={} | metrics={} | modelo_usado={}",
+            session_id,
+            {
+                name: round(value, 2)
+                for name, value in sorted(get_request_metrics().items())
+            },
+            modelo_usado,
+        )
+        finish_request_metrics(token)
         try:
-            wav_path.unlink(missing_ok=True)
+            if wav_path is not None:
+                wav_path.unlink(missing_ok=True)
         except Exception:
             pass
 
 
 # ── Wake Word Listener (thread principal) ─────────────────────────────────────
+
 
 class WakeWordListener:
     """
@@ -276,7 +432,9 @@ class WakeWordListener:
         """Inicia a thread de escuta em background."""
         self._loop = loop
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._listen, daemon=True, name="porcupine-listener")
+        self._thread = threading.Thread(
+            target=self._listen, daemon=True, name="porcupine-listener"
+        )
         self._thread.start()
         logger.info("WakeWordListener iniciado (aguardando 'Pulsar'...)")
 
@@ -340,16 +498,16 @@ class WakeWordListener:
                         continue
 
                     pcm = frame.flatten().astype(np.int16)
-                    result = porcupine.process(pcm) # type: ignore
+                    result = porcupine.process(pcm)  # type: ignore
 
                     if result >= 0:
                         logger.success("Wake word 'Pulsar' detectada!")
                         # Notifica frontend
-                        broadcast_sync({"type": "wake_word"}, self._loop) # type: ignore
+                        broadcast_sync({"type": "wake_word"}, self._loop)  # type: ignore
                         # Roda pipeline de voz no event loop asyncio
                         asyncio.run_coroutine_threadsafe(
-                            _run_voice_pipeline(self._session_id, self._loop), # type: ignore
-                            self._loop, # type: ignore
+                            _run_voice_pipeline(self._session_id, self._loop),  # type: ignore
+                            self._loop,  # type: ignore
                         )
                         # Limpa fila para descartar áudio acumulado durante o pipeline
                         with audio_queue.mutex:

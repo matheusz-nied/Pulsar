@@ -74,7 +74,7 @@ Usuário → FastAPI → ConversationAgent
     └── Salva conversa no ChromaDB → retorna resposta
 ```
 
-**LLM_PROVIDER** (via .env): `claude` | `gemini` | `openai` | `deepseek` | `ollama`
+**LLM_PROVIDER** (via .env): `claude` | `gemini` | `openai` | `deepseek` | `groq` | `ollama`
 
 ---
 
@@ -110,8 +110,10 @@ async def minha_tool(param: str) -> str:
 
 | Variável | Obrig. | Descrição |
 |----------|--------|-----------|
-| `LLM_PROVIDER` | ○ | `claude` (padrão), `gemini`, `openai`, `deepseek`, `ollama` |
+| `LLM_PROVIDER` | ○ | `claude` (padrão), `gemini`, `openai`, `deepseek`, `groq`, `ollama` |
 | `ANTHROPIC_API_KEY` | ✅ | Obrigatória se `LLM_PROVIDER=claude` |
+| `GROQ_API_KEY` | ○ | Obrigatória se `LLM_PROVIDER=groq` |
+| `GROQ_MODEL` | ○ | Default: `llama-3.3-70b-versatile` |
 | `OLLAMA_BASE_URL` | ○ | Default: `http://localhost:11434` |
 | `OLLAMA_MODEL` | ○ | Default: `gemma3:4b-it-qat` |
 | `TELEGRAM_BOT_TOKEN` | ○ | Bot opcional; sem token é ignorado |

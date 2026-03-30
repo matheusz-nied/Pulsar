@@ -1,7 +1,7 @@
 {
-  "venvPath": "/home/kaizen/Documents/Dev/Projetos/Jarvis/assistente_local",
+  "venvPath": "/home/kaizen/Documents/Dev/Projetos/Pulsar",
   "venv": ".conda_env",
   "extraPaths": [
-    "/home/kaizen/Documents/Dev/Projetos/Jarvis/assistente_local"
+    "/home/kaizen/Documents/Dev/Projetos/Pulsar"
   ]
 }

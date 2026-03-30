@@ -30,25 +30,24 @@ class TestSearchProviders:
     async def test_duckduckgo_provider_estrutura(self):
         """Testa se DuckDuckGoProvider retorna estrutura correta."""
         provider = DuckDuckGoProvider()
-        
+
         # Mock da resposta da API
         mock_response = {
             "RelatedTopics": [
                 {
                     "Text": "Python is a high-level programming language",
-                    "FirstURL": "https://www.python.org"
+                    "FirstURL": "https://www.python.org",
                 }
             ]
         }
-        
+
         with patch("httpx.AsyncClient.get") as mock_get:
             mock_get.return_value = AsyncMock(
-                json=lambda: mock_response,
-                raise_for_status=lambda: None
+                json=lambda: mock_response, raise_for_status=lambda: None
             )
-            
+
             resultados = await provider.buscar("Python", 3)
-            
+
             assert isinstance(resultados, list)
             if resultados:  # DuckDuckGo pode não retornar resultados
                 assert "title" in resultados[0]
@@ -59,7 +58,7 @@ class TestSearchProviders:
     async def test_duckduckgo_provider_erro_nao_quebra(self):
         """Testa que erros no DuckDuckGo não quebram o app."""
         provider = DuckDuckGoProvider()
-        
+
         with patch("httpx.AsyncClient.get", side_effect=Exception("Network error")):
             resultados = await provider.buscar("test query", 3)
             assert resultados == []  # Retorna lista vazia em caso de erro
@@ -68,27 +67,26 @@ class TestSearchProviders:
     async def test_brave_provider_estrutura(self):
         """Testa se BraveSearchProvider retorna estrutura correta."""
         provider = BraveSearchProvider("fake_api_key")
-        
+
         mock_response = {
             "web": {
                 "results": [
                     {
                         "title": "Test Title",
                         "url": "https://example.com",
-                        "description": "Test description"
+                        "description": "Test description",
                     }
                 ]
             }
         }
-        
+
         with patch("httpx.AsyncClient.get") as mock_get:
             mock_get.return_value = AsyncMock(
-                json=lambda: mock_response,
-                raise_for_status=lambda: None
+                json=lambda: mock_response, raise_for_status=lambda: None
             )
-            
+
             resultados = await provider.buscar("test", 3)
-            
+
             assert len(resultados) == 1
             assert resultados[0]["title"] == "Test Title"
             assert resultados[0]["url"] == "https://example.com"
@@ -114,7 +112,7 @@ class TestSearchService:
         """Testa a troca de provider em runtime."""
         service = SearchService()
         novo_provider = DuckDuckGoProvider()
-        
+
         service.trocar_provider(novo_provider)
         assert service.provider == novo_provider
 
@@ -122,33 +120,53 @@ class TestSearchService:
     async def test_buscar_formata_resultados(self):
         """Testa que buscar() formata os resultados corretamente."""
         service = SearchService()
-        
+
         mock_resultados = [
             {
                 "title": "Resultado 1",
                 "url": "https://example.com/1",
-                "description": "Descrição 1"
+                "description": "Descrição 1",
             },
             {
                 "title": "Resultado 2",
                 "url": "https://example.com/2",
-                "description": "Descrição 2"
-            }
+                "description": "Descrição 2",
+            },
         ]
-        
+
         with patch.object(service.provider, "buscar", return_value=mock_resultados):
             resultado = await service.buscar("test", 2)
-            
-            assert "**Resultado 1**" in resultado
+
+            assert "Fonte 1: Resultado 1" in resultado
             assert "https://example.com/1" in resultado
-            assert "Descrição 1" in resultado
-            assert "**Resultado 2**" in resultado
+            assert "Resumo: Descrição 1" in resultado
+            assert "Fonte 2: Resultado 2" in resultado
+
+    @pytest.mark.asyncio
+    async def test_buscar_limpa_html_e_markdown_basico(self):
+        """Testa sanitização de HTML/markdown vindo do provider."""
+        service = SearchService()
+
+        mock_resultados = [
+            {
+                "title": "**David Goggins**",
+                "url": "https://example.com/david",
+                "description": "David is a <strong>motivational speaker</strong>",
+            }
+        ]
+
+        with patch.object(service.provider, "buscar", return_value=mock_resultados):
+            resultado = await service.buscar("david goggins", 1)
+
+            assert "**" not in resultado
+            assert "<strong>" not in resultado
+            assert "motivational speaker" in resultado
 
     @pytest.mark.asyncio
     async def test_buscar_sem_resultados(self):
         """Testa comportamento quando não há resultados."""
         service = SearchService()
-        
+
         with patch.object(service.provider, "buscar", return_value=[]):
             resultado = await service.buscar("test", 3)
             assert resultado == "Nenhum resultado encontrado."
@@ -157,8 +175,10 @@ class TestSearchService:
     async def test_buscar_com_erro(self):
         """Testa que erros são tratados graciosamente."""
         service = SearchService()
-        
-        with patch.object(service.provider, "buscar", side_effect=Exception("API Error")):
+
+        with patch.object(
+            service.provider, "buscar", side_effect=Exception("API Error")
+        ):
             resultado = await service.buscar("test", 3)
             assert "Erro ao buscar:" in resultado
 
@@ -185,15 +205,14 @@ class TestResumirPagina:
             </body>
         </html>
         """
-        
+
         with patch("httpx.AsyncClient.get") as mock_get:
             mock_get.return_value = AsyncMock(
-                text=mock_html,
-                raise_for_status=lambda: None
+                text=mock_html, raise_for_status=lambda: None
             )
-            
+
             resultado = await resumir_pagina("https://en.wikipedia.org/wiki/Python")
-            
+
             assert "Conteúdo relevante" in resultado
             assert "alert('test')" not in resultado  # Scripts removidos
             assert len(resultado) <= 2000  # Limite de caracteres
@@ -213,7 +232,7 @@ class TestBuscarWebFunction:
     async def test_buscar_web_usa_service_global(self):
         """Testa que buscar_web usa o search_service global."""
         mock_resultado = "Resultado da busca"
-        
+
         with patch.object(search_service, "buscar", return_value=mock_resultado):
             resultado = await buscar_web("test query", 3)
             assert resultado == mock_resultado
@@ -222,6 +241,7 @@ class TestBuscarWebFunction:
 # ============================================================================
 # TESTE DE INTEGRAÇÃO REAL (opcional - requer conexão)
 # ============================================================================
+
 
 class TestIntegracaoReal:
     """Testes de integração com APIs reais (podem ser lentos)."""
@@ -234,7 +254,7 @@ class TestIntegracaoReal:
         with patch.dict(os.environ, {}, clear=True):
             service = SearchService()
             resultado = await service.buscar("Python programming language", 2)
-            
+
             # Verifica se retornou algo (pode ser "Nenhum resultado" ou resultados)
             assert isinstance(resultado, str)
             assert len(resultado) > 0
@@ -243,9 +263,14 @@ class TestIntegracaoReal:
     @pytest.mark.integration
     async def test_resumir_pagina_real_wikipedia(self):
         """Testa resumo de página real da Wikipedia."""
-        resultado = await resumir_pagina("https://en.wikipedia.org/wiki/Python_(programming_language)")
-        
+        resultado = await resumir_pagina(
+            "https://en.wikipedia.org/wiki/Python_(programming_language)"
+        )
+
         assert isinstance(resultado, str)
         assert len(resultado) > 0
         # Wikipedia deve conter algo sobre Python
-        assert any(palavra in resultado.lower() for palavra in ["python", "programming", "language"])
+        assert any(
+            palavra in resultado.lower()
+            for palavra in ["python", "programming", "language"]
+        )

@@ -11,7 +11,7 @@ Responsável por:
 
 from __future__ import annotations
 
-import os
+import asyncio
 import platform
 import subprocess
 from typing import Any
@@ -20,7 +20,6 @@ import psutil
 from loguru import logger
 
 from backend.core.logging_config import log_tool_call
-
 
 # ============================================================================
 # WHITELIST DE APLICATIVOS
@@ -47,22 +46,66 @@ async def run_command(command: str) -> str:
     """
     try:
         logger.info(f"Executando comando: {command}")
-        result = subprocess.run(
+        process = await asyncio.create_subprocess_shell(
             command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode != 0:
-            logger.warning(f"Comando retornou código {result.returncode}: {result.stderr}")
-        return result.stdout or result.stderr
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise subprocess.TimeoutExpired(command, 30) from exc
+
+        stdout_text = stdout.decode("utf-8", errors="ignore")
+        stderr_text = stderr.decode("utf-8", errors="ignore")
+
+        if process.returncode != 0:
+            logger.warning(
+                f"Comando retornou código {process.returncode}: {stderr_text}"
+            )
+        return stdout_text or stderr_text
     except subprocess.TimeoutExpired:
         logger.error(f"Timeout ao executar comando: {command}")
         return "Erro: Comando excedeu o tempo limite."
     except Exception as e:
         logger.error(f"Erro ao executar comando: {e}")
         raise
+
+
+async def _run_exec_checked(*args: str) -> tuple[str, str]:
+    """
+    Executa um comando com create_subprocess_exec e valida retorno.
+
+    Args:
+        *args: Lista de argumentos do executável.
+
+    Returns:
+        Tupla com stdout e stderr decodificados.
+
+    Raises:
+        FileNotFoundError: Quando o executável não existe.
+        subprocess.CalledProcessError: Quando o retorno é diferente de zero.
+    """
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    stdout_text = stdout.decode("utf-8", errors="ignore")
+    stderr_text = stderr.decode("utf-8", errors="ignore")
+
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(
+            process.returncode,
+            list(args),
+            output=stdout_text,
+            stderr=stderr_text,
+        )
+
+    return stdout_text, stderr_text
 
 
 async def get_system_info() -> dict[str, str]:
@@ -87,6 +130,7 @@ async def get_system_info() -> dict[str, str]:
 # ============================================================================
 # GERENCIAMENTO DE APLICATIVOS
 # ============================================================================
+
 
 @log_tool_call
 async def abrir_app(nome: str) -> str:
@@ -142,6 +186,7 @@ async def abrir_app(nome: str) -> str:
         return f"Erro ao abrir aplicativo: {str(e)}"
 
 
+@log_tool_call
 async def fechar_app(nome: str) -> str:
     """
     Encontra processos pelo nome e solicita confirmação para fechar.
@@ -160,10 +205,12 @@ async def fechar_app(nome: str) -> str:
             try:
                 proc_name = proc.info["name"].lower()
                 if nome_normalizado in proc_name:
-                    processos_encontrados.append({
-                        "pid": proc.info["pid"],
-                        "name": proc.info["name"],
-                    })
+                    processos_encontrados.append(
+                        {
+                            "pid": proc.info["pid"],
+                            "name": proc.info["name"],
+                        }
+                    )
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -171,8 +218,7 @@ async def fechar_app(nome: str) -> str:
             return f"Nenhum processo encontrado com o nome '{nome}'."
 
         lista_processos = "\n".join(
-            f"  - PID {p['pid']}: {p['name']}"
-            for p in processos_encontrados
+            f"  - PID {p['pid']}: {p['name']}" for p in processos_encontrados
         )
 
         return (
@@ -186,6 +232,7 @@ async def fechar_app(nome: str) -> str:
         return f"Erro ao buscar processos: {str(e)}"
 
 
+@log_tool_call
 async def confirmar_fechar(nome: str) -> str:
     """
     Fecha todos os processos encontrados pelo nome (após confirmação via fechar_app).
@@ -206,7 +253,9 @@ async def confirmar_fechar(nome: str) -> str:
                 if nome_normalizado in proc_name:
                     proc.terminate()
                     processos_fechados += 1
-                    logger.info(f"Processo {proc.info['pid']} ({proc.info['name']}) terminado")
+                    logger.info(
+                        f"Processo {proc.info['pid']} ({proc.info['name']}) terminado"
+                    )
             except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
                 logger.warning(f"Não foi possível fechar processo: {e}")
                 continue
@@ -225,6 +274,8 @@ async def confirmar_fechar(nome: str) -> str:
 # CONTROLE DE VOLUME
 # ============================================================================
 
+
+@log_tool_call
 async def ajustar_volume(nivel: int) -> str:
     """
     Ajusta o volume do sistema.
@@ -243,19 +294,21 @@ async def ajustar_volume(nivel: int) -> str:
 
         if sistema == "Linux":
             try:
-                subprocess.run(
-                    ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{nivel}%"],
-                    check=True,
-                    capture_output=True,
+                await _run_exec_checked(
+                    "pactl",
+                    "set-sink-volume",
+                    "@DEFAULT_SINK@",
+                    f"{nivel}%",
                 )
                 logger.info(f"Volume ajustado para {nivel}% via pactl")
                 return f"Volume ajustado para {nivel}%."
             except (FileNotFoundError, subprocess.CalledProcessError):
                 try:
-                    subprocess.run(
-                        ["amixer", "set", "Master", f"{nivel}%"],
-                        check=True,
-                        capture_output=True,
+                    await _run_exec_checked(
+                        "amixer",
+                        "set",
+                        "Master",
+                        f"{nivel}%",
                     )
                     logger.info(f"Volume ajustado para {nivel}% via amixer")
                     return f"Volume ajustado para {nivel}%."
@@ -266,11 +319,17 @@ async def ajustar_volume(nivel: int) -> str:
         elif sistema == "Windows":
             try:
                 from ctypes import POINTER, cast
+
                 from comtypes import CLSCTX_ALL  # type: ignore
-                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume  # type: ignore
+                from pycaw.pycaw import (  # type: ignore
+                    AudioUtilities,
+                    IAudioEndpointVolume,
+                )
 
                 devices = AudioUtilities.GetSpeakers()
-                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                interface = devices.Activate(
+                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None
+                )
                 volume = cast(interface, POINTER(IAudioEndpointVolume))
                 volume.SetMasterVolumeLevelScalar(nivel / 100.0, None)
                 logger.info(f"Volume ajustado para {nivel}% via pycaw")
@@ -278,10 +337,10 @@ async def ajustar_volume(nivel: int) -> str:
             except ImportError:
                 logger.warning("pycaw não instalado, tentando nircmd")
                 try:
-                    subprocess.run(
-                        ["nircmd.exe", "setsysvolume", str(int(nivel * 655.35))],
-                        check=True,
-                        capture_output=True,
+                    await _run_exec_checked(
+                        "nircmd.exe",
+                        "setsysvolume",
+                        str(int(nivel * 655.35)),
                     )
                     logger.info(f"Volume ajustado para {nivel}% via nircmd")
                     return f"Volume ajustado para {nivel}%."
@@ -294,10 +353,10 @@ async def ajustar_volume(nivel: int) -> str:
 
         elif sistema == "Darwin":
             try:
-                subprocess.run(
-                    ["osascript", "-e", f"set volume output volume {nivel}"],
-                    check=True,
-                    capture_output=True,
+                await _run_exec_checked(
+                    "osascript",
+                    "-e",
+                    f"set volume output volume {nivel}",
                 )
                 logger.info(f"Volume ajustado para {nivel}% via osascript")
                 return f"Volume ajustado para {nivel}%."
@@ -380,7 +439,9 @@ async def _executar_alarme(mensagem: str, job_id: str) -> None:
             if enviado:
                 logger.info("Notificação do alarme enviada via Telegram")
             else:
-                logger.warning("Notificação do alarme não enviada: verifique TELEGRAM_OWNER_ID")
+                logger.warning(
+                    "Notificação do alarme não enviada: verifique TELEGRAM_OWNER_ID"
+                )
         except Exception as e:
             logger.warning(f"Erro ao enviar notificação do alarme via Telegram: {e}")
 
@@ -427,6 +488,7 @@ async def definir_alarme(horario: str, mensagem: str) -> str:
                 # Se o horário já passou hoje, agendar para amanhã
                 if data_hora <= agora:
                     from datetime import timedelta
+
                     data_hora += timedelta(days=1)
 
             except ValueError:
@@ -452,7 +514,9 @@ async def definir_alarme(horario: str, mensagem: str) -> str:
         scheduler.modify_job(job.id, args=[mensagem, job.id])
 
         data_hora_formatada = data_hora.strftime("%d/%m/%Y às %H:%M")
-        logger.info(f"Alarme agendado: {mensagem} para {data_hora_formatada} (ID={job.id})")
+        logger.info(
+            f"Alarme agendado: {mensagem} para {data_hora_formatada} (ID={job.id})"
+        )
 
         return (
             f"✅ Alarme agendado para {data_hora_formatada}\n"
@@ -465,6 +529,7 @@ async def definir_alarme(horario: str, mensagem: str) -> str:
         return f"Erro ao definir alarme: {str(e)}"
 
 
+@log_tool_call
 async def listar_alarmes() -> str:
     """
     Lista todos os alarmes agendados ativos.
@@ -512,6 +577,7 @@ async def listar_alarmes() -> str:
         return f"Erro ao listar alarmes: {str(e)}"
 
 
+@log_tool_call
 async def cancelar_alarme(job_id: str) -> str:
     """
     Cancela um alarme pelo seu ID.

@@ -9,8 +9,7 @@ Responsável por:
 
 from __future__ import annotations
 
-import os
-import subprocess
+import asyncio
 from pathlib import Path
 
 from loguru import logger
@@ -32,26 +31,34 @@ class YoutubeMusicController:
         """Lazy init do cliente ytmusicapi."""
         if self._yt is None:
             from ytmusicapi import YTMusic
+
             # Usa headers extraídos do Brave
             headers_file = Path.home() / ".config" / "pulsar-ytmusic" / "headers.json"
-            
+
             if headers_file.exists():
                 self._yt = YTMusic(str(headers_file))
                 logger.info("ytmusicapi autenticado via headers do Brave")
             else:
                 # Modo sem autenticação (busca limitada)
                 self._yt = YTMusic()
-                logger.warning("ytmusicapi sem autenticação. Execute scripts/setup_ytmusic_cookies.py")
-        
+                logger.warning(
+                    "ytmusicapi sem autenticação. Execute scripts/setup_ytmusic_cookies.py"
+                )
+
         return self._yt
+
+    async def _run_exec(self, *args: str) -> None:
+        """Executa um comando sem bloquear o event loop."""
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await process.communicate()
 
     async def _abrir_brave(self, url: str) -> None:
         """Abre URL no Brave."""
-        subprocess.run(
-            ["brave-browser", url],
-            check=False,
-            capture_output=True,
-        )
+        await self._run_exec("brave-browser", url)
         self._browser_aberto = True
 
     async def tocar(self, query: str) -> str:
@@ -66,28 +73,28 @@ class YoutubeMusicController:
         """
         try:
             yt = self._get_yt()
-            
+
             # Busca música
-            results = yt.search(query, filter="songs")
-            
+            results = await asyncio.to_thread(yt.search, query, filter="songs")
+
             if not results:
                 return f"Nenhuma música encontrada para '{query}'."
-            
+
             # Pega primeiro resultado
             song = results[0]
             video_id = song.get("videoId")
             title = song.get("title", query)
-            
+
             if not video_id:
                 return f"Não foi possível obter ID do vídeo para '{query}'."
-            
+
             # Abre no Brave
             url = f"{self.BASE_URL}/watch?v={video_id}"
             await self._abrir_brave(url)
-            
+
             logger.info(f"Tocando: {title}")
             return f"Tocando: {title}"
-            
+
         except Exception as e:
             logger.error(f"Erro ao tocar '{query}': {e}")
             return f"Não foi possível tocar '{query}': {str(e)}"
@@ -95,11 +102,7 @@ class YoutubeMusicController:
     async def pausar(self) -> str:
         """Pausa/retoma via tecla Espaço."""
         try:
-            subprocess.run(
-                ["xdotool", "key", "space"],
-                check=False,
-                capture_output=True,
-            )
+            await self._run_exec("xdotool", "key", "space")
             return "Play/Pause acionado."
         except Exception as e:
             return f"Erro: {e}. Instale xdotool: sudo apt install xdotool"
@@ -107,11 +110,7 @@ class YoutubeMusicController:
     async def proximo(self) -> str:
         """Próxima música via Shift+N."""
         try:
-            subprocess.run(
-                ["xdotool", "key", "Shift+N"],
-                check=False,
-                capture_output=True,
-            )
+            await self._run_exec("xdotool", "key", "Shift+N")
             return "Próxima música."
         except Exception as e:
             return f"Erro: {e}"
@@ -120,10 +119,11 @@ class YoutubeMusicController:
         """Ajusta volume do sistema."""
         try:
             nivel = max(0, min(100, nivel))
-            subprocess.run(
-                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{nivel}%"],
-                check=False,
-                capture_output=True,
+            await self._run_exec(
+                "pactl",
+                "set-sink-volume",
+                "@DEFAULT_SINK@",
+                f"{nivel}%",
             )
             return f"Volume ajustado para {nivel}%."
         except Exception as e:
@@ -166,26 +166,25 @@ async def controlar_musica(acao: str, query: str = "") -> str:
 async def setup_ytmusic() -> str:
     """
     Configura autenticação do YouTube Music.
-    
+
     Execute uma vez para autorizar o acesso à sua conta.
-    
+
     Returns:
         Instruções de setup.
     """
     try:
-        from ytmusicapi import setup
-        import asyncio
-        
         config_dir = Path.home() / ".config" / "pulsar-ytmusic"
         config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Abre browser para autorização
-        subprocess.run(
-            ["brave-browser", "https://music.youtube.com"],
-            check=False,
-            capture_output=True,
+        process = await asyncio.create_subprocess_exec(
+            "brave-browser",
+            "https://music.youtube.com",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        
+        await process.communicate()
+
         return (
             "Setup iniciado. Siga as instruções no terminal para autorizar "
             "o acesso ao YouTube Music. Você precisará fazer login no browser "

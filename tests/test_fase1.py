@@ -11,11 +11,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
+from openai import APIError as OpenAIAPIError
 
+from backend.agent.agent import (
+    AgentResponse,
+    ConversationAgent,
+    _deve_responder_sem_tools,
+)
 from backend.agent.memory import PersistentMemory, SessionMemory
 
 
@@ -23,9 +32,14 @@ from backend.agent.memory import PersistentMemory, SessionMemory
 def mock_llm_provider():
     """Mock do LLM provider para evitar chamadas reais à API."""
     # Mock do método processar do agent que já foi importado no main.py
-    with patch("backend.main.agent.processar", new_callable=AsyncMock) as mock_processar:
+    with patch(
+        "backend.main.agent.processar", new_callable=AsyncMock
+    ) as mock_processar:
         # Configura resposta padrão
-        mock_processar.side_effect = lambda msg, hist: f"Resposta mock para: {msg}"
+        mock_processar.return_value = AgentResponse(
+            resposta="Resposta mock para: teste",
+            modelo_usado="mock-llm",
+        )
         yield mock_processar
 
 
@@ -68,7 +82,7 @@ def test_health(client):
     assert data["status"] == "ok"
     assert "version" in data
     assert "components" in data
-    assert data["components"]["llm"] == "online"
+    assert data["components"]["llm_primary"] in {"online", "lazy"}
     assert data["components"]["memory"] == "online"
 
 
@@ -96,8 +110,14 @@ def test_conversar_com_contexto(client, mock_llm_provider):
     """Test 3: Duas mensagens na mesma sessão mantêm contexto."""
     # Configura mock para retornar respostas diferentes
     respostas = [
-        "Brasília é a capital do Brasil.",
-        "A população de Brasília é aproximadamente 3 milhões.",
+        AgentResponse(
+            resposta="Brasília é a capital do Brasil.",
+            modelo_usado="mock-llm",
+        ),
+        AgentResponse(
+            resposta="A população de Brasília é aproximadamente 3 milhões.",
+            modelo_usado="mock-llm",
+        ),
     ]
     mock_llm_provider.side_effect = respostas
 
@@ -147,6 +167,14 @@ def test_conversar_mensagem_vazia(client):
     assert "detail" in response.json()
 
 
+def test_deve_responder_sem_tools_em_mensagem_social():
+    """Perguntas sociais simples não devem entrar no tool calling."""
+    assert _deve_responder_sem_tools("Quem é você?")
+    assert _deve_responder_sem_tools("Oi")
+    assert not _deve_responder_sem_tools("Quem é David Goggins?")
+    assert not _deve_responder_sem_tools("Abra o Chrome")
+
+
 # --- Testes de Memory ---
 
 
@@ -156,7 +184,7 @@ def test_memory_limit(temp_session_memory):
 
     # Adiciona 25 mensagens
     for i in range(25):
-        temp_session_memory.add_message(session_id, "user", f"Mensagem {i+1}")
+        temp_session_memory.add_message(session_id, "user", f"Mensagem {i + 1}")
 
     # Verifica que apenas 20 foram mantidas
     history = temp_session_memory.get_history(session_id)
@@ -242,8 +270,14 @@ def test_integracao_completa(client, mock_llm_provider):
     """Test 6: Fluxo completo de conversação com persistência."""
     # Simula respostas do LLM
     mock_llm_provider.side_effect = [
-        "Python é uma linguagem de programação.",
-        "Sim, Python é muito popular para IA e Data Science.",
+        AgentResponse(
+            resposta="Python é uma linguagem de programação.",
+            modelo_usado="mock-llm",
+        ),
+        AgentResponse(
+            resposta="Sim, Python é muito popular para IA e Data Science.",
+            modelo_usado="mock-llm",
+        ),
     ]
 
     # Primeira mensagem
@@ -274,3 +308,159 @@ def test_integracao_completa(client, mock_llm_provider):
             # Verifica que a sessão foi salva
             assert session_id in saved_data
             assert len(saved_data[session_id]) == 4  # 2 user + 2 assistant
+
+
+@pytest.mark.asyncio
+async def test_processar_stream_aceita_eventos_com_namespace():
+    """Aceita eventos `(namespace, mode, data)` emitidos pelo LangGraph."""
+    agent = object.__new__(ConversationAgent)
+    agent._verificar_confirmacao = AsyncMock(return_value=None)
+    agent.try_fast_path = AsyncMock(return_value=None)
+    agent._buscar_contexto_vetorial = AsyncMock(return_value=None)
+    agent._converter_historico = lambda mensagem, historico, contexto: []
+    agent._extrair_resposta_final = ConversationAgent._extrair_resposta_final.__get__(
+        agent,
+        ConversationAgent,
+    )
+    agent._normalizar_stream_evento = (
+        ConversationAgent._normalizar_stream_evento.__get__(agent, ConversationAgent)
+    )
+    agent.ollama_agent = None
+
+    async def fake_astream(*args, **kwargs):
+        yield (
+            (),
+            "messages",
+            (SimpleNamespace(content="Oi ", tool_call_chunks=None), {}),
+        )
+        yield (
+            (),
+            "messages",
+            (SimpleNamespace(content="mundo", tool_call_chunks=None), {}),
+        )
+        yield ("values", {"messages": [AIMessage(content="Oi mundo")]})
+
+    agent.graph = SimpleNamespace(astream=fake_astream)
+
+    chunks = []
+    async for chunk in ConversationAgent.processar_stream(
+        agent,
+        "teste",
+        [],
+        "sessao-teste",
+    ):
+        chunks.append(chunk)
+
+    assert "".join(chunks) == "Oi mundo"
+
+
+@pytest.mark.asyncio
+async def test_processar_stream_aceita_eventos_v2_com_dict():
+    """Aceita eventos `version="v2"` no formato dict do LangGraph."""
+    agent = object.__new__(ConversationAgent)
+    agent._verificar_confirmacao = AsyncMock(return_value=None)
+    agent.try_fast_path = AsyncMock(return_value=None)
+    agent._buscar_contexto_vetorial = AsyncMock(return_value=None)
+    agent._converter_historico = lambda mensagem, historico, contexto: []
+    agent._extrair_resposta_final = ConversationAgent._extrair_resposta_final.__get__(
+        agent,
+        ConversationAgent,
+    )
+    agent._normalizar_stream_evento = (
+        ConversationAgent._normalizar_stream_evento.__get__(agent, ConversationAgent)
+    )
+    agent.ollama_agent = None
+
+    async def fake_astream(*args, **kwargs):
+        yield {
+            "type": "messages",
+            "ns": (),
+            "data": (SimpleNamespace(content="Oi ", tool_call_chunks=None), {}),
+        }
+        yield {
+            "type": "messages",
+            "ns": (),
+            "data": (SimpleNamespace(content="mundo", tool_call_chunks=None), {}),
+        }
+        yield {
+            "type": "values",
+            "ns": (),
+            "data": {"messages": [AIMessage(content="Oi mundo")]},
+        }
+
+    agent.graph = SimpleNamespace(astream=fake_astream)
+
+    chunks = []
+    async for chunk in ConversationAgent.processar_stream(
+        agent,
+        "teste",
+        [],
+        "sessao-teste",
+    ):
+        chunks.append(chunk)
+
+    assert "".join(chunks) == "Oi mundo"
+
+
+@pytest.mark.asyncio
+async def test_processar_mensagem_social_sem_tools_nao_chama_grafo():
+    """Mensagens sociais simples devem usar o LLM direto, sem tools."""
+    agent = object.__new__(ConversationAgent)
+    agent.llm = SimpleNamespace()
+    agent._verificar_confirmacao = AsyncMock(return_value=None)
+    agent.try_fast_path = AsyncMock(return_value=None)
+    agent._converter_historico = lambda mensagem, historico, contexto: []
+    agent._responder_sem_tools = AsyncMock(return_value="Sou o Pulsar.")
+    agent.graph = SimpleNamespace(
+        ainvoke=AsyncMock(side_effect=AssertionError("graph não deveria ser chamado"))
+    )
+
+    result = await ConversationAgent.processar(
+        agent,
+        "Quem é você?",
+        [],
+        "sessao-teste",
+    )
+
+    assert result.resposta == "Sou o Pulsar."
+    agent._responder_sem_tools.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_processar_stream_faz_fallback_quando_groq_falha_tool_call():
+    """Erros OpenAI/Groq no tool calling devem cair no fallback Ollama."""
+    agent = object.__new__(ConversationAgent)
+    agent._verificar_confirmacao = AsyncMock(return_value=None)
+    agent.try_fast_path = AsyncMock(return_value=None)
+    agent._buscar_contexto_vetorial = AsyncMock(return_value=None)
+    agent._converter_historico = lambda mensagem, historico, contexto: []
+    agent._normalizar_stream_evento = (
+        ConversationAgent._normalizar_stream_evento.__get__(agent, ConversationAgent)
+    )
+    request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    provider_error = OpenAIAPIError(
+        "Failed to call a function",
+        request,
+        body={"error": {"failed_generation": '{"tool_calls":[]}'}},
+    )
+
+    async def fake_astream(*args, **kwargs):
+        raise provider_error
+        yield  # pragma: no cover
+
+    agent.graph = SimpleNamespace(astream=fake_astream)
+    agent.ollama_agent = SimpleNamespace(
+        check_ollama=AsyncMock(return_value=True),
+        processar=AsyncMock(return_value="Resposta fallback do Ollama."),
+    )
+
+    chunks = []
+    async for chunk in ConversationAgent.processar_stream(
+        agent,
+        "Quem é David Goggins?",
+        [],
+        "sessao-teste",
+    ):
+        chunks.append(chunk)
+
+    assert "".join(chunks) == "Resposta fallback do Ollama."

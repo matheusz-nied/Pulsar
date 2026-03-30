@@ -15,19 +15,30 @@ import asyncio
 import base64
 import json
 import os
+import threading
+import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
-
 
 # --- Configuração do Ambiente ---
 
@@ -36,13 +47,23 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # Backend imports (precisam do .env carregado para inicializar o agente)
-from backend.agent.agent import agent  # noqa: E402
-from backend.agent.memory import persistent_memory, session_memory, vector_memory  # noqa: E402
-from backend.audio.stt import get_stt  # noqa: E402
-from backend.audio.tts import get_tts  # noqa: E402
-from backend.core.logging_config import read_last_lines, setup_logging  # noqa: E402
+from backend.agent.agent import agent, get_agent, get_loaded_agent  # noqa: E402
+from backend.agent.memory import (  # noqa: E402
+    persistence_worker,
+    schedule_conversation_persistence,
+    session_memory,
+    warmup_vector_memory,
+)
+from backend.core.http_client import close_shared_http_clients  # noqa: E402
+from backend.core.logging_config import (  # noqa: E402
+    finish_request_metrics,
+    get_request_metrics,
+    read_last_lines,
+    set_request_metric,
+    setup_logging,
+    start_request_metrics,
+)
 from backend.memory.database import db  # noqa: E402
-
 
 # --- Configuração do Loguru ---
 
@@ -51,14 +72,17 @@ setup_logging()
 
 # --- Models ---
 
+
 class ConversarRequest(BaseModel):
     """Modelo de requisição para o endpoint /conversar."""
+
     mensagem: str
     session_id: str | None = None
 
 
 class ConversarResponse(BaseModel):
     """Modelo de resposta do endpoint /conversar."""
+
     resposta: str
     session_id: str
     modelo_usado: str = "claude"  # "claude" | "ollama" | "erro"
@@ -66,6 +90,7 @@ class ConversarResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Modelo de resposta do endpoint /health."""
+
     status: str
     version: str
     components: dict[str, str]
@@ -73,11 +98,13 @@ class HealthResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Modelo de resposta de erro."""
+
     detail: str
 
 
 class VoiceResponse(BaseModel):
     """Modelo de resposta do endpoint /voice."""
+
     transcricao: str
     resposta: str
     audio_url: str
@@ -87,16 +114,186 @@ class VoiceResponse(BaseModel):
 
 class NotifyRequest(BaseModel):
     """Modelo de requisição para o endpoint /notify."""
+
     mensagem: str
 
 
 class NotifyResponse(BaseModel):
     """Modelo de resposta para o endpoint /notify."""
+
     enviado: bool
     detalhe: str
 
 
+def _json_stream_event(payload: dict[str, Any]) -> str:
+    """Serializa um evento em JSON Lines para streaming HTTP."""
+    return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
+def _resolver_extensao_upload_audio(audio: UploadFile) -> str:
+    """
+    Resolve uma extensao segura para salvar uploads de audio temporarios.
+
+    Args:
+        audio: Arquivo enviado pelo cliente.
+
+    Returns:
+        Extensao com ponto inicial, ex: ".webm" ou ".mp3".
+    """
+    extensoes_permitidas = {
+        ".wav",
+        ".mp3",
+        ".webm",
+        ".ogg",
+        ".m4a",
+        ".mp4",
+        ".aac",
+        ".flac",
+    }
+    if audio.filename:
+        suffix = Path(audio.filename).suffix.lower()
+        if suffix in extensoes_permitidas:
+            return suffix
+
+    content_type = (audio.content_type or "").split(";", maxsplit=1)[0].strip()
+    content_type_map = {
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/wave": ".wav",
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/webm": ".webm",
+        "audio/ogg": ".ogg",
+        "application/ogg": ".ogg",
+        "audio/mp4": ".mp4",
+        "audio/x-m4a": ".m4a",
+        "audio/aac": ".aac",
+        "audio/flac": ".flac",
+    }
+    return content_type_map.get(content_type, ".webm")
+
+
+def _extrair_frases_tts(
+    buffer: str,
+    min_chars: int = 18,
+) -> tuple[list[str], str]:
+    """
+    Extrai frases prontas para TTS incremental a partir do buffer.
+
+    Args:
+        buffer: Texto acumulado até o momento.
+        min_chars: Tamanho mínimo para fragmentos curtos.
+
+    Returns:
+        Tupla com (frases_prontas, restante_do_buffer).
+    """
+    frases: list[str] = []
+    inicio = 0
+    pontuacao_forte = ".!?:"
+    pontuacao_fraca = ";"
+    min_chars_virgula = 72
+
+    for idx, char in enumerate(buffer):
+        if char not in pontuacao_forte and char not in pontuacao_fraca and char != ",":
+            continue
+
+        frase = buffer[inicio : idx + 1].strip()
+        if not frase:
+            inicio = idx + 1
+            continue
+
+        if char == "," and len(frase) < min_chars_virgula:
+            continue
+
+        if char in pontuacao_fraca and len(frase) < min_chars:
+            continue
+
+        if len(frase) < 8:
+            continue
+
+        frases.append(frase)
+        inicio = idx + 1
+
+    restante = buffer[inicio:].lstrip()
+    return frases, restante
+
+
+def _log_request_metrics(
+    route: str,
+    session_id: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """
+    Emite um log consolidado com as métricas coletadas na requisição.
+
+    Args:
+        route: Identificador da rota ou pipeline.
+        session_id: Sessão associada à requisição.
+        extra: Metadados adicionais para facilitar análise.
+    """
+    metrics = {
+        name: round(value, 2) for name, value in sorted(get_request_metrics().items())
+    }
+    extra_payload = extra or {}
+    logger.info(
+        "Request metrics: route={} | session_id={} | metrics={} | extra={}",
+        route,
+        session_id,
+        json.dumps(metrics, ensure_ascii=False),
+        json.dumps(extra_payload, ensure_ascii=False),
+    )
+
+
+_stt_warmup_started = False
+_stt_warmup_lock = threading.Lock()
+
+
+def _warmup_stt_sync() -> None:
+    """Carrega o STT em thread daemon para evitar cold start na primeira voz."""
+    try:
+        from backend.audio.stt import get_stt
+
+        get_stt("small")
+    except Exception as exc:
+        logger.warning(f"Warmup de STT falhou: {exc}")
+
+
+async def _warmup_agent_async() -> None:
+    """Pré-carrega o agente principal em background sem travar o startup."""
+    try:
+        await asyncio.to_thread(get_agent)
+    except Exception as exc:
+        logger.warning(f"Warmup do agente falhou: {exc}")
+
+
+def _request_stt_warmup() -> None:
+    """Dispara aquecimento do STT em background sem bloquear o app."""
+    global _stt_warmup_started
+
+    with _stt_warmup_lock:
+        if _stt_warmup_started:
+            return
+        _stt_warmup_started = True
+
+    threading.Thread(
+        target=_warmup_stt_sync,
+        daemon=True,
+        name="pulsar-stt-warmup",
+    ).start()
+
+
+async def _warmup_runtime_components() -> None:
+    """Aquece componentes pesados em background sem bloquear o startup."""
+    await warmup_vector_memory()
+    _request_stt_warmup()
+    asyncio.create_task(
+        _warmup_agent_async(),
+        name="pulsar-agent-warmup",
+    )
+
+
 # --- Lifecycle ---
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -112,16 +309,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Inicializar banco de dados SQLite
     await db.inicializar()
+    await persistence_worker.start()
 
     # Inicializar APScheduler para alarmes
     from backend.tools.system import iniciar_scheduler
+
     iniciar_scheduler()
+
+    warmup_task = asyncio.create_task(
+        _warmup_runtime_components(),
+        name="pulsar-runtime-warmup",
+    )
+    app.state.warmup_task = warmup_task
 
     # Inicializar Wake Word Listener (Porcupine) se habilitado
     wake_listener = None
     if os.getenv("PORCUPINE_ACCESS_KEY", ""):
         try:
             from backend.audio.wake_word import get_wake_word_listener
+
             wake_listener = get_wake_word_listener()
             wake_listener.start(asyncio.get_event_loop())
         except Exception as e:
@@ -135,7 +341,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Parar APScheduler graciosamente
     from backend.tools.system import parar_scheduler
+
     parar_scheduler()
+
+    warmup_task = getattr(app.state, "warmup_task", None)
+    if warmup_task is not None and not warmup_task.done():
+        warmup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await warmup_task
+
+    await persistence_worker.stop()
+    await close_shared_http_clients()
 
     # Fechar conexão com banco de dados
     await db.fechar()
@@ -168,6 +384,7 @@ app.add_middleware(
 
 # --- Exception Handler Global ---
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
@@ -191,12 +408,13 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         status_code=500,
         content={
             "detail": "Ocorreu um erro interno no servidor. "
-                      "Tente novamente ou contacte o administrador."
+            "Tente novamente ou contacte o administrador."
         },
     )
 
 
 # --- Endpoints ---
+
 
 @app.get(
     "/health",
@@ -216,12 +434,18 @@ async def health_check() -> HealthResponse:
     Returns:
         Status da API e de cada componente.
     """
+    loaded_agent = get_loaded_agent()
+    provider_name = os.getenv("LLM_PROVIDER", "claude").lower()
+    primary_status = "online" if loaded_agent is not None else "lazy"
+
     # Verifica status do Ollama (fallback offline)
-    ollama_status = "offline"
-    if hasattr(agent, "ollama_agent") and agent.ollama_agent:
+    ollama_status = "lazy"
+    if loaded_agent is not None and loaded_agent.ollama_agent:
         try:
-            if await agent.ollama_agent.check_ollama():
+            if await loaded_agent.ollama_agent.check_ollama():
                 ollama_status = "online"
+            else:
+                ollama_status = "offline"
         except Exception as e:
             logger.debug(f"Health check Ollama falhou: {e}")
 
@@ -229,7 +453,8 @@ async def health_check() -> HealthResponse:
         status="ok",
         version=APP_VERSION,
         components={
-            "llm_claude": "online",  # Assume online se o servidor está rodando
+            "llm_primary": primary_status,
+            f"llm_{provider_name}": primary_status,
             "llm_ollama": ollama_status,
             "memory": "online",
         },
@@ -270,20 +495,31 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
 
     # Gera um novo session_id se não fornecido
     session_id = request.session_id or str(uuid.uuid4())
+    token = start_request_metrics()
+    started_at = time.perf_counter()
+    modelo_usado = "erro"
 
     try:
         # a. Carregar histórico da sessão
         historico = session_memory.get_history(session_id)
 
         # b. Chamar agente com mensagem e histórico (inclui busca/save na memória vetorial)
-        agent_response = await agent.processar(request.mensagem, historico, session_id=session_id)  # type: ignore[arg-type]
+        agent_response = await agent.processar(
+            request.mensagem, historico, session_id=session_id
+        )  # type: ignore[arg-type]
+        modelo_usado = agent_response.modelo_usado
 
         # c. Adicionar mensagem do usuário E resposta do agente ao histórico
         session_memory.add_message(session_id, "user", request.mensagem)
         session_memory.add_message(session_id, "assistant", agent_response.resposta)
 
-        # d. Persistir histórico atualizado
-        persistent_memory.save(session_id, session_memory.get_history(session_id))
+        # d. Persistir fora do caminho crítico
+        schedule_conversation_persistence(
+            session_id,
+            session_memory.get_history(session_id),
+            request.mensagem,
+            agent_response.resposta,
+        )
 
         # e. Retornar resposta com session_id e modelo usado
         return ConversarResponse(
@@ -298,6 +534,149 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
             status_code=500,
             detail="Erro ao processar sua mensagem. Tente novamente.",
         )
+    finally:
+        set_request_metric("total_ms", (time.perf_counter() - started_at) * 1000)
+        _log_request_metrics(
+            "/conversar",
+            session_id,
+            {
+                "mensagem_chars": len(request.mensagem),
+                "modelo_usado": modelo_usado,
+            },
+        )
+        finish_request_metrics(token)
+
+
+@app.post(
+    "/conversar/stream",
+    summary="Enviar mensagem ao assistente com streaming",
+    description="Envia uma mensagem de texto e recebe chunks da resposta em tempo real.",
+)
+async def conversar_stream(request: ConversarRequest) -> StreamingResponse:
+    """
+    Endpoint de conversação com streaming HTTP em JSON Lines.
+
+    Args:
+        request: Corpo da requisição com 'mensagem' e 'session_id' opcional.
+
+    Returns:
+        StreamingResponse com eventos JSON Lines.
+    """
+    if not request.mensagem.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="A mensagem não pode ser vazia.",
+        )
+
+    session_id = request.session_id or str(uuid.uuid4())
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        token = start_request_metrics()
+        started_at = time.perf_counter()
+        resposta_completa = ""
+        modelo_usado = "erro"
+
+        try:
+            historico = session_memory.get_history(session_id)
+            yield _json_stream_event({"type": "session", "session_id": session_id})
+
+            fast_path_response = await agent.try_fast_path(request.mensagem)  # type: ignore[attr-defined]
+            if fast_path_response is not None:
+                resposta_completa = fast_path_response.resposta
+                modelo_usado = fast_path_response.modelo_usado
+
+                if resposta_completa:
+                    yield _json_stream_event(
+                        {"type": "chunk", "texto": resposta_completa}
+                    )
+
+                session_memory.add_message(session_id, "user", request.mensagem)
+                session_memory.add_message(session_id, "assistant", resposta_completa)
+                schedule_conversation_persistence(
+                    session_id,
+                    session_memory.get_history(session_id),
+                    request.mensagem,
+                    resposta_completa,
+                )
+                yield _json_stream_event(
+                    {
+                        "type": "done",
+                        "session_id": session_id,
+                        "texto": resposta_completa,
+                        "modelo_usado": modelo_usado,
+                    }
+                )
+                return
+
+            async for chunk in agent.processar_stream(
+                request.mensagem,
+                historico,
+                session_id=session_id,
+            ):
+                resposta_completa += chunk
+                yield _json_stream_event({"type": "chunk", "texto": chunk})
+
+            if not resposta_completa.strip():
+                yield _json_stream_event(
+                    {
+                        "type": "error",
+                        "mensagem": "Não foi possível gerar uma resposta.",
+                    }
+                )
+                return
+
+            session_memory.add_message(session_id, "user", request.mensagem)
+            session_memory.add_message(session_id, "assistant", resposta_completa)
+            schedule_conversation_persistence(
+                session_id,
+                session_memory.get_history(session_id),
+                request.mensagem,
+                resposta_completa,
+            )
+
+            loaded_agent = get_loaded_agent()
+            modelo_usado = (
+                loaded_agent.llm.__class__.__name__
+                if loaded_agent is not None
+                else "lazy"
+            )
+            yield _json_stream_event(
+                {
+                    "type": "done",
+                    "session_id": session_id,
+                    "texto": resposta_completa,
+                    "modelo_usado": modelo_usado,
+                }
+            )
+        except Exception as exc:
+            logger.error(f"Erro no streaming da sessão {session_id}: {exc}")
+            yield _json_stream_event(
+                {
+                    "type": "error",
+                    "mensagem": "Erro ao processar sua mensagem em streaming.",
+                }
+            )
+        finally:
+            set_request_metric("total_ms", (time.perf_counter() - started_at) * 1000)
+            _log_request_metrics(
+                "/conversar/stream",
+                session_id,
+                {
+                    "mensagem_chars": len(request.mensagem),
+                    "modelo_usado": modelo_usado,
+                    "resposta_chars": len(resposta_completa),
+                },
+            )
+            finish_request_metrics(token)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post(
@@ -312,7 +691,9 @@ async def conversar(request: ConversarRequest) -> ConversarResponse:
 )
 async def processar_voz(
     audio: UploadFile = File(..., description="Arquivo de áudio (WAV, MP3, etc.)"),
-    session_id: str | None = Form(None, description="ID da sessão para manter contexto"),
+    session_id: str | None = Form(
+        None, description="ID da sessão para manter contexto"
+    ),
 ) -> VoiceResponse:
     """
     Endpoint de processamento de voz.
@@ -335,13 +716,15 @@ async def processar_voz(
         HTTPException: 400 se o arquivo for inválido, 500 em erros de processamento.
     """
     temp_audio_path: Path | None = None
+    session_id = session_id or str(uuid.uuid4())
+    token = start_request_metrics()
+    started_at = time.perf_counter()
+    modelo_usado = "erro"
 
     try:
-        # Gera session_id se não fornecido
-        session_id = session_id or str(uuid.uuid4())
-
         # 1. Salvar arquivo temporário
-        temp_filename = f"input_{uuid.uuid4()}.wav"
+        temp_suffix = _resolver_extensao_upload_audio(audio)
+        temp_filename = f"input_{uuid.uuid4()}{temp_suffix}"
         temp_audio_path = Path("/tmp") / temp_filename
 
         logger.info(
@@ -361,30 +744,42 @@ async def processar_voz(
         logger.debug(f"Áudio salvo temporariamente em: {temp_audio_path}")
 
         # 2. Transcrever áudio (STT)
-        stt = get_stt(model_size="base")  # Usa modelo base para melhor performance
+        from backend.audio.stt import get_stt
+
+        stt = get_stt(model_size="small")
         transcricao = await stt.transcrever(str(temp_audio_path))
 
         if not transcricao.strip():
             raise HTTPException(
                 status_code=400,
                 detail="Não foi possível transcrever o áudio. "
-                       "Verifique se o áudio contém fala clara.",
+                "Verifique se o áudio contém fala clara.",
             )
 
         logger.info(f"Transcrição (sessão {session_id}): {transcricao}")
 
         # 3. Processar com o agente (inclui busca/save na memória vetorial)
         historico = session_memory.get_history(session_id)
-        agent_response = await agent.processar(transcricao, historico, session_id=session_id)  # type: ignore[arg-type]
+        agent_response = await agent.processar(
+            transcricao, historico, session_id=session_id
+        )  # type: ignore[arg-type]
+        modelo_usado = agent_response.modelo_usado
 
         # 4. Atualizar histórico da sessão
         session_memory.add_message(session_id, "user", transcricao)
         session_memory.add_message(session_id, "assistant", agent_response.resposta)
-        persistent_memory.save(session_id, session_memory.get_history(session_id))
+        schedule_conversation_persistence(
+            session_id,
+            session_memory.get_history(session_id),
+            transcricao,
+            agent_response.resposta,
+        )
 
         logger.info(f"Resposta gerada (sessão {session_id}): {agent_response.resposta}")
 
         # 5. Sintetizar resposta (TTS)
+        from backend.audio.tts import get_tts
+
         tts = get_tts()
         audio_path = await tts.sintetizar(agent_response.resposta)
         audio_filename = Path(audio_path).name
@@ -417,6 +812,13 @@ async def processar_voz(
             detail=f"Erro ao processar áudio: {str(e)}",
         )
     finally:
+        set_request_metric("total_ms", (time.perf_counter() - started_at) * 1000)
+        _log_request_metrics(
+            "/voice",
+            session_id,
+            {"audio_filename": audio.filename or "", "modelo_usado": modelo_usado},
+        )
+        finish_request_metrics(token)
         # Limpar arquivo temporário
         if temp_audio_path and temp_audio_path.exists():
             try:
@@ -447,6 +849,8 @@ async def servir_audio(filename: str) -> FileResponse:
     Raises:
         HTTPException: 404 se o arquivo não existir.
     """
+    from backend.audio.tts import get_tts
+
     # Validar que o filename não contém caracteres perigosos
     if ".." in filename or "/" in filename:
         raise HTTPException(
@@ -535,7 +939,9 @@ async def notify_telegram(payload: NotifyRequest) -> NotifyResponse:
 
         enviado = await send_notification(payload.mensagem.strip())
         if enviado:
-            return NotifyResponse(enviado=True, detalhe="Notificação enviada com sucesso.")
+            return NotifyResponse(
+                enviado=True, detalhe="Notificação enviada com sucesso."
+            )
 
         return NotifyResponse(
             enviado=False,
@@ -554,12 +960,19 @@ async def notify_telegram(payload: NotifyRequest) -> NotifyResponse:
 )
 async def obter_logs(
     tipo: str = Query(default="acoes", description="Tipo do log: acoes ou erros."),
-    limite: int = Query(default=50, ge=1, le=500, description="Número máximo de linhas."),
+    limite: int = Query(
+        default=50, ge=1, le=500, description="Número máximo de linhas."
+    ),
 ) -> list[str]:
     """Lê as últimas N linhas do arquivo de log conforme o tipo informado."""
     try:
         linhas = read_last_lines(tipo=tipo, limite=limite)
-        logger.debug("Endpoint /logs consultado: tipo={} limite={} linhas={}", tipo, limite, len(linhas))
+        logger.debug(
+            "Endpoint /logs consultado: tipo={} limite={} linhas={}",
+            tipo,
+            limite,
+            len(linhas),
+        )
         return linhas
     except Exception as exc:
         logger.error("Erro ao consultar logs: {}", exc)
@@ -568,16 +981,19 @@ async def obter_logs(
 
 # --- WebSocket ---
 
+
 @app.websocket("/ws/audio")
 async def websocket_audio(ws: WebSocket) -> None:
     """
     WebSocket para processamento de áudio em streaming.
 
-    Protocolo de mensagens (JSON):
-    - Cliente envia: {"type": "audio_chunk", "data": "<base64>", "session_id": "<id>"}
+    Protocolo de mensagens:
+    - Cliente envia: frames binários WebM/Opus com áudio incremental
+    - Cliente também pode enviar: {"type": "audio_chunk", "data": "<base64>", "session_id": "<id>"} para compatibilidade
     - Cliente envia: {"type": "audio_end", "session_id": "<id>"}
     - Servidor responde: {"type": "transcricao", "texto": str}
     - Servidor responde: {"type": "resposta_chunk", "texto": str}
+    - Servidor responde: {"type": "audio_chunk", "url": str}
     - Servidor responde: {"type": "audio_ready", "url": str}
     - Servidor responde: {"type": "erro", "mensagem": str}
     """
@@ -589,7 +1005,20 @@ async def websocket_audio(ws: WebSocket) -> None:
 
     try:
         while True:
-            raw = await ws.receive_text()
+            event = await ws.receive()
+            event_type = event.get("type")
+            if event_type == "websocket.disconnect":
+                logger.info(f"WebSocket /ws/audio: desconectado (session={session_id})")
+                break
+
+            data_bytes = event.get("bytes")
+            if data_bytes is not None:
+                audio_buffer.extend(data_bytes)
+                continue
+
+            raw = event.get("text")
+            if raw is None:
+                continue
 
             try:
                 msg = json.loads(raw)
@@ -608,7 +1037,10 @@ async def websocket_audio(ws: WebSocket) -> None:
                 data_b64 = msg.get("data", "")
                 if not data_b64:
                     await ws.send_json(
-                        {"type": "erro", "mensagem": "Campo 'data' vazio no audio_chunk"}
+                        {
+                            "type": "erro",
+                            "mensagem": "Campo 'data' vazio no audio_chunk",
+                        }
                     )
                     continue
                 try:
@@ -623,14 +1055,23 @@ async def websocket_audio(ws: WebSocket) -> None:
             elif msg_type == "audio_end":
                 if not audio_buffer:
                     await ws.send_json(
-                        {"type": "erro", "mensagem": "Nenhum áudio recebido antes de audio_end"}
+                        {
+                            "type": "erro",
+                            "mensagem": "Nenhum áudio recebido antes de audio_end",
+                        }
                     )
                     continue
 
+                token = start_request_metrics()
+                started_at = time.perf_counter()
+                modelo_usado = "erro"
+                audio_size = len(audio_buffer)
                 temp_audio_path: Path | None = None
+                phrase_queue: asyncio.Queue[str | None] | None = None
+                tts_task: asyncio.Task[None] | None = None
                 try:
-                    # 1. Salvar áudio temporário
-                    temp_filename = f"ws_input_{uuid.uuid4()}.wav"
+                    # 1. Salvar áudio temporário no formato enviado pelo browser
+                    temp_filename = f"ws_input_{uuid.uuid4()}.webm"
                     temp_audio_path = Path("/tmp") / temp_filename
                     temp_audio_path.write_bytes(bytes(audio_buffer))
                     audio_buffer.clear()
@@ -641,49 +1082,125 @@ async def websocket_audio(ws: WebSocket) -> None:
                     )
 
                     # 2. Transcrever (STT)
-                    stt = get_stt(model_size="base")
+                    from backend.audio.stt import get_stt
+
+                    stt = get_stt(model_size="small")
                     transcricao = await stt.transcrever(str(temp_audio_path))
 
                     await ws.send_json({"type": "transcricao", "texto": transcricao})
                     logger.info(f"WS transcricao: {transcricao[:80]}...")
 
-                    # 3. Processar com agente (streaming com contexto vetorial)
-                    historico = session_memory.get_history(session_id)
                     resposta_completa = ""
+                    frase_buffer = ""
+                    audio_chunk_urls: list[str] = []
+                    from backend.audio.tts import get_tts
 
-                    async for chunk in agent.processar_stream(
-                        transcricao, historico, session_id=session_id
-                    ):
-                        resposta_completa += chunk
-                        await ws.send_json({"type": "resposta_chunk", "texto": chunk})
+                    tts = get_tts()
+                    phrase_queue = asyncio.Queue()
+
+                    async def tts_worker() -> None:
+                        while True:
+                            frase = await phrase_queue.get()
+                            try:
+                                if frase is None:
+                                    return
+
+                                audio_path = await tts.sintetizar_frase(frase)
+                                audio_filename = Path(audio_path).name
+                                audio_url = f"/audio/{audio_filename}"
+                                audio_chunk_urls.append(audio_url)
+                                set_request_metric(
+                                    "tts_chunks",
+                                    float(len(audio_chunk_urls)),
+                                )
+                                await ws.send_json(
+                                    {"type": "audio_chunk", "url": audio_url}
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "WS falhou ao sintetizar frase para TTS incremental: {}",
+                                    exc,
+                                )
+                            finally:
+                                phrase_queue.task_done()
+
+                    tts_task = asyncio.create_task(
+                        tts_worker(),
+                        name=f"pulsar-ws-audio-tts-{session_id}",
+                    )
+
+                    fast_path_response = await agent.try_fast_path(transcricao)  # type: ignore[attr-defined]
+                    if fast_path_response is not None:
+                        resposta_completa = fast_path_response.resposta
+                        modelo_usado = fast_path_response.modelo_usado
+                        if resposta_completa:
+                            await ws.send_json(
+                                {
+                                    "type": "resposta_chunk",
+                                    "texto": resposta_completa,
+                                }
+                            )
+                            frase_buffer += resposta_completa
+                            frases_prontas, frase_buffer = _extrair_frases_tts(
+                                frase_buffer
+                            )
+                            for frase in frases_prontas:
+                                await phrase_queue.put(frase)
+                    else:
+                        # 3. Processar com agente (streaming com contexto vetorial)
+                        historico = session_memory.get_history(session_id)
+                        async for chunk in agent.processar_stream(
+                            transcricao, historico, session_id=session_id
+                        ):
+                            resposta_completa += chunk
+                            frase_buffer += chunk
+                            await ws.send_json(
+                                {"type": "resposta_chunk", "texto": chunk}
+                            )
+                            frases_prontas, frase_buffer = _extrair_frases_tts(
+                                frase_buffer
+                            )
+                            for frase in frases_prontas:
+                                await phrase_queue.put(frase)
+
+                        loaded_agent = get_loaded_agent()
+                        modelo_usado = (
+                            loaded_agent.llm.__class__.__name__
+                            if loaded_agent is not None
+                            else "lazy"
+                        )
 
                     logger.info(f"WS resposta completa: {resposta_completa[:80]}...")
 
                     # 4. Atualizar histórico
                     session_memory.add_message(session_id, "user", transcricao)
-                    session_memory.add_message(session_id, "assistant", resposta_completa)
-                    persistent_memory.save(
-                        session_id, session_memory.get_history(session_id)
+                    session_memory.add_message(
+                        session_id, "assistant", resposta_completa
+                    )
+                    schedule_conversation_persistence(
+                        session_id,
+                        session_memory.get_history(session_id),
+                        transcricao,
+                        resposta_completa,
                     )
 
-                    # 5a. Salvar na memória vetorial (streaming não salva dentro do agent)
-                    if vector_memory is not None:
-                        await vector_memory.salvar_conversa(
-                            session_id, transcricao, resposta_completa
-                        )
-
-                    # 6. Sintetizar resposta (TTS)
-                    tts = get_tts()
-                    audio_path = await tts.sintetizar(resposta_completa)
-                    audio_filename = Path(audio_path).name
+                    # 5. Finalizar TTS incremental (flush do restante)
+                    if frase_buffer.strip():
+                        await phrase_queue.put(frase_buffer.strip())
+                    await phrase_queue.put(None)
+                    await phrase_queue.join()
+                    await tts_task
 
                     await ws.send_json(
-                        {"type": "audio_ready", "url": f"/audio/{audio_filename}"}
+                        {
+                            "type": "audio_ready",
+                            "url": audio_chunk_urls[0] if audio_chunk_urls else "",
+                        }
                     )
 
                     logger.success(
                         f"WS pipeline concluída (session={session_id}): "
-                        f"audio={audio_filename}"
+                        f"audio_chunks={len(audio_chunk_urls)}"
                     )
 
                 except Exception as e:
@@ -692,6 +1209,25 @@ async def websocket_audio(ws: WebSocket) -> None:
                         {"type": "erro", "mensagem": f"Erro no processamento: {str(e)}"}
                     )
                 finally:
+                    if tts_task is not None and not tts_task.done():
+                        if phrase_queue is not None:
+                            with suppress(asyncio.QueueFull):
+                                await phrase_queue.put(None)
+                        tts_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await tts_task
+                    set_request_metric(
+                        "total_ms", (time.perf_counter() - started_at) * 1000
+                    )
+                    _log_request_metrics(
+                        "/ws/audio",
+                        session_id,
+                        {
+                            "audio_bytes": audio_size,
+                            "modelo_usado": modelo_usado,
+                        },
+                    )
+                    finish_request_metrics(token)
                     if temp_audio_path and temp_audio_path.exists():
                         try:
                             temp_audio_path.unlink()
@@ -700,7 +1236,10 @@ async def websocket_audio(ws: WebSocket) -> None:
 
             else:
                 await ws.send_json(
-                    {"type": "erro", "mensagem": f"Tipo de mensagem desconhecido: {msg_type}"}
+                    {
+                        "type": "erro",
+                        "mensagem": f"Tipo de mensagem desconhecido: {msg_type}",
+                    }
                 )
 
     except WebSocketDisconnect:
@@ -715,6 +1254,7 @@ async def websocket_audio(ws: WebSocket) -> None:
 
 # --- WebSocket: eventos de voz (wake word, STT, resposta, TTS) ---
 
+
 @app.websocket("/ws/voice")
 async def websocket_voice(ws: WebSocket) -> None:
     """
@@ -724,6 +1264,7 @@ async def websocket_voice(ws: WebSocket) -> None:
       {"type": "wake_word"}                  → wake word detectada
       {"type": "transcricao", "texto": ...}  → STT concluído
       {"type": "resposta_chunk", "texto": ...} → chunk de resposta do agente
+      {"type": "audio_chunk", "url": ...}    → segmento de TTS pronto
       {"type": "audio_ready", "url": ...}    → TTS pronto para reproduzir
       {"type": "voice_idle"}                 → pipeline encerrou sem áudio válido
       {"type": "erro", "mensagem": ...}      → erro no pipeline
@@ -736,7 +1277,11 @@ async def websocket_voice(ws: WebSocket) -> None:
         await ws.send_json(event)
 
     try:
-        from backend.audio.wake_word import register_voice_listener, unregister_voice_listener
+        from backend.audio.wake_word import (
+            register_voice_listener,
+            unregister_voice_listener,
+        )
+
         register_voice_listener(_send)
 
         # Mantém conexão viva até o cliente desconectar
@@ -760,6 +1305,7 @@ async def websocket_voice(ws: WebSocket) -> None:
     finally:
         try:
             from backend.audio.wake_word import unregister_voice_listener
+
             unregister_voice_listener(_send)
         except Exception:
             pass
